@@ -18,6 +18,9 @@ export function Settings() {
   const [shareWithHousehold, setShareWithHousehold] = useState(true);
   const [assignedUserId, setAssignedUserId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
+  const [adminStatusSavingId, setAdminStatusSavingId] = useState<number | null>(
+    null
+  );
 
   useEffect(() => {
     if (user?.id != null) {
@@ -97,6 +100,30 @@ export function Settings() {
       setCreatingMember(false);
     }
   }
+
+  async function setMemberAdmin(memberId: number, is_admin: boolean) {
+    if (!user?.is_admin) return;
+    setAdminStatusSavingId(memberId);
+    setError(null);
+    try {
+      await api(`/api/admin/users/${memberId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_admin }),
+      });
+      await refreshUser();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not update administrator status"
+      );
+    } finally {
+      setAdminStatusSavingId(null);
+    }
+  }
+
+  const adminMemberCount = user?.household
+    ? user.household.members.filter((m) => m.is_admin).length
+    : 0;
+  const soleAdminInHousehold = adminMemberCount === 1;
 
   return (
     <div className="min-h-[100dvh] w-full min-w-0 overflow-x-hidden bg-paper">
@@ -362,23 +389,48 @@ export function Settings() {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted">
                   Who has access
                 </p>
-                <ul className="mt-2 flex flex-wrap gap-2">
-                  {user.household.members.map((m) => (
-                    <li
-                      key={m.id}
-                      className="max-w-full break-all rounded-full border border-border bg-paper px-3 py-1.5 text-sm text-ink dark:border-[rgba(0,245,255,0.55)] dark:bg-black/40 dark:shadow-[0_0_20px_rgba(0,240,255,0.45),0_0_40px_rgba(200,79,255,0.2)]"
-                    >
-                      {m.username}
-                      {m.is_admin ? (
-                        <span className="ml-1.5 text-xs font-medium text-accent">
-                          admin
+                <ul className="mt-2 space-y-2">
+                  {user.household.members.map((m) => {
+                    const saving = adminStatusSavingId === m.id;
+                    const lockLastAdmin = soleAdminInHousehold && m.is_admin;
+                    return (
+                      <li
+                        key={m.id}
+                        className="flex max-w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-paper px-3 py-2.5 text-sm text-ink dark:border-[rgba(0,245,255,0.55)] dark:bg-black/40 dark:shadow-[0_0_20px_rgba(0,240,255,0.45),0_0_40px_rgba(200,79,255,0.2)]"
+                      >
+                        <span className="min-w-0 break-all">
+                          <span className="font-medium">{m.username}</span>
+                          {m.is_admin ? (
+                            <span className="ml-1.5 text-xs font-medium text-accent">
+                              admin
+                            </span>
+                          ) : null}
+                          {m.id === user.id ? (
+                            <span className="ml-1 text-muted">(you)</span>
+                          ) : null}
                         </span>
-                      ) : null}
-                      {m.id === user.id ? (
-                        <span className="ml-1 text-muted">(you)</span>
-                      ) : null}
-                    </li>
-                  ))}
+                        {user.is_admin ? (
+                          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 shrink-0 accent-accent disabled:cursor-not-allowed disabled:opacity-60"
+                              checked={m.is_admin}
+                              disabled={saving || lockLastAdmin}
+                              title={
+                                lockLastAdmin
+                                  ? "Promote another administrator before removing the last one."
+                                  : undefined
+                              }
+                              onChange={(e) => {
+                                void setMemberAdmin(m.id, e.target.checked);
+                              }}
+                            />
+                            <span className="text-ink">Administrator</span>
+                          </label>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             </section>

@@ -98,6 +98,10 @@ const createMemberSchema = z.object({
   is_admin: z.boolean().optional(),
 });
 
+const patchMemberAdminSchema = z.object({
+  is_admin: z.boolean(),
+});
+
 const scheduleCreateSchema = z.object({
   envelope_id: z.number().int().positive(),
   day_of_month: z.number().int().min(1).max(31),
@@ -495,6 +499,72 @@ export function createRouter(db: Database.Database): Router {
       }
       throw e;
     }
+  });
+
+  r.patch("/api/admin/users/:id", authMiddleware, (req, res) => {
+    const { user } = req as AuthedRequest;
+    if (!user.isAdmin) {
+      res.status(403).json({ error: "Only an administrator can change admin status." });
+      return;
+    }
+    const targetId = Number(req.params.id);
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      res.status(400).json({ error: "Invalid user id." });
+      return;
+    }
+    const parsed = patchMemberAdminSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    const { is_admin: nextAdmin } = parsed.data;
+
+    const target = db
+      .prepare(
+        "SELECT id, username, household_id, is_admin FROM users WHERE id = ?"
+      )
+      .get(targetId) as
+      | {
+          id: number;
+          username: string;
+          household_id: number | null;
+          is_admin: number;
+        }
+      | undefined;
+
+    if (!target || target.household_id !== user.householdId) {
+      res.status(404).json({ error: "User not found in your household." });
+      return;
+    }
+
+    const wasAdmin = target.is_admin === 1;
+    if (wasAdmin && !nextAdmin) {
+      const otherAdmins = db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM users
+           WHERE household_id = ? AND is_admin = 1 AND id != ?`
+        )
+        .get(user.householdId, targetId) as { n: number };
+      if (otherAdmins.n === 0) {
+        res.status(400).json({
+          error:
+            "The household must keep at least one administrator. Promote another user first.",
+        });
+        return;
+      }
+    }
+
+    db.prepare("UPDATE users SET is_admin = ? WHERE id = ?").run(
+      nextAdmin ? 1 : 0,
+      targetId
+    );
+    res.json({
+      user: {
+        id: targetId,
+        username: target.username,
+        is_admin: nextAdmin,
+      },
+    });
   });
 
   r.get("/api/me", authMiddleware, (req, res) => {
