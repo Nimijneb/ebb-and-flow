@@ -6,6 +6,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { openDb, getDbPath } from "./db.js";
 import { createRouter } from "./routes.js";
+import { runDueSchedules } from "./schedule.js";
 import { seedAdminFromEnv } from "./seed.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -57,3 +58,20 @@ app.listen(PORT, () => {
   console.log(`Envelope budget API listening on port ${PORT}`);
   console.log(`Database: ${getDbPath()}`);
 });
+
+/** Run monthly schedules on an interval (server local date). */
+const SCHEDULE_TICK_MS = 60_000;
+setInterval(() => {
+  try {
+    runDueSchedules(db);
+  } catch (e) {
+    console.error("Scheduled transactions:", e);
+  }
+}, SCHEDULE_TICK_MS);
+setTimeout(() => {
+  try {
+    runDueSchedules(db);
+  } catch (e) {
+    console.error("Scheduled transactions (startup):", e);
+  }
+}, 10_000);

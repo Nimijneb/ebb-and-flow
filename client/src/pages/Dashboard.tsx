@@ -74,6 +74,12 @@ export function Dashboard() {
           </div>
           <div className="flex shrink-0 flex-wrap items-center justify-end justify-self-end gap-1 sm:gap-2">
             <Link
+              to="/schedules"
+              className="btn-ghost inline-flex shrink-0 items-center justify-center rounded-xl px-3 text-sm sm:text-base"
+            >
+              Schedules
+            </Link>
+            <Link
               to="/manage"
               className="btn-ghost inline-flex shrink-0 items-center justify-center rounded-xl px-3 text-sm sm:text-base"
             >

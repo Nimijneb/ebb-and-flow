@@ -61,6 +61,7 @@ function migrate(db: Database.Database): void {
 
   migrateHouseholds(db);
   migrateEnvelopeShared(db);
+  migrateScheduledTransactions(db);
 }
 
 /** Shared = visible to whole household; private = only creator (same household). */
@@ -70,6 +71,32 @@ function migrateEnvelopeShared(db: Database.Database): void {
     db.exec(
       "ALTER TABLE envelopes ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 1"
     );
+  }
+}
+
+/** Monthly Ebb/Flow automation; transactions are created as the owning user. */
+function migrateScheduledTransactions(db: Database.Database): void {
+  const t = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_transactions'"
+    )
+    .get() as { name: string } | undefined;
+  if (!t) {
+    db.exec(`
+      CREATE TABLE scheduled_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        envelope_id INTEGER NOT NULL REFERENCES envelopes(id) ON DELETE CASCADE,
+        day_of_month INTEGER NOT NULL CHECK(day_of_month >= 1 AND day_of_month <= 31),
+        type TEXT NOT NULL CHECK(type IN ('ebb','flow')),
+        amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+        note TEXT NOT NULL DEFAULT 'Scheduled',
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+        last_run_month TEXT
+      );
+      CREATE INDEX idx_sched_user ON scheduled_transactions(user_id);
+      CREATE INDEX idx_sched_envelope ON scheduled_transactions(envelope_id);
+    `);
   }
 }
 

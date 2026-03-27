@@ -57,6 +57,24 @@ const createMemberSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+const scheduleCreateSchema = z.object({
+  envelope_id: z.number().int().positive(),
+  day_of_month: z.number().int().min(1).max(31),
+  type: z.enum(["ebb", "flow"]),
+  amount_cents: z.number().int().positive().max(999_999_999_99),
+  note: z.string().trim().min(1).max(500).optional(),
+  enabled: z.boolean().optional(),
+});
+
+const schedulePatchSchema = z.object({
+  envelope_id: z.number().int().positive().optional(),
+  day_of_month: z.number().int().min(1).max(31).optional(),
+  type: z.enum(["ebb", "flow"]).optional(),
+  amount_cents: z.number().int().positive().max(999_999_999_99).optional(),
+  note: z.string().trim().min(1).max(500).optional(),
+  enabled: z.boolean().optional(),
+});
+
 function createAuthMiddleware(db: Database.Database) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const header = req.headers.authorization;
@@ -618,6 +636,261 @@ export function createRouter(db: Database.Database): Router {
       res.status(204).send();
     }
   );
+
+  function getAccessibleEnvelopeId(
+    user: { id: number; householdId: number },
+    envelopeId: number
+  ): { id: number } | undefined {
+    return db
+      .prepare(
+        `SELECT e.id FROM envelopes e
+         WHERE e.id = ? AND e.household_id = ?
+         AND (e.is_shared = 1 OR e.user_id = ?)`
+      )
+      .get(envelopeId, user.householdId, user.id) as { id: number } | undefined;
+  }
+
+  r.get("/api/schedules", authMiddleware, (req, res) => {
+    const { user } = req as AuthedRequest;
+    const rows = db
+      .prepare(
+        `SELECT s.id, s.envelope_id, e.name AS envelope_name, s.day_of_month, s.type,
+          s.amount_cents, s.note, s.enabled, s.last_run_month
+         FROM scheduled_transactions s
+         JOIN envelopes e ON e.id = s.envelope_id
+         WHERE s.user_id = ?
+         ORDER BY s.day_of_month ASC, s.id ASC`
+      )
+      .all(user.id) as Array<{
+        id: number;
+        envelope_id: number;
+        envelope_name: string;
+        day_of_month: number;
+        type: "ebb" | "flow";
+        amount_cents: number;
+        note: string;
+        enabled: number;
+        last_run_month: string | null;
+      }>;
+    res.json({
+      schedules: rows.map((r) => ({
+        id: r.id,
+        envelope_id: r.envelope_id,
+        envelope_name: r.envelope_name,
+        day_of_month: r.day_of_month,
+        type: r.type,
+        amount_cents: r.amount_cents,
+        note: r.note,
+        enabled: r.enabled === 1,
+        last_run_month: r.last_run_month,
+      })),
+    });
+  });
+
+  r.post("/api/schedules", authMiddleware, (req, res) => {
+    const { user } = req as AuthedRequest;
+    const parsed = scheduleCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    const { envelope_id, day_of_month, type, amount_cents, enabled } =
+      parsed.data;
+    const note = parsed.data.note?.trim() || "Scheduled";
+    if (!getAccessibleEnvelopeId(user, envelope_id)) {
+      res.status(404).json({ error: "Envelope not found" });
+      return;
+    }
+    const enabledFlag = enabled === false ? 0 : 1;
+    const info = db
+      .prepare(
+        `INSERT INTO scheduled_transactions
+        (user_id, envelope_id, day_of_month, type, amount_cents, note, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        user.id,
+        envelope_id,
+        day_of_month,
+        type,
+        amount_cents,
+        note,
+        enabledFlag
+      );
+    const id = Number(info.lastInsertRowid);
+    const row = db
+      .prepare(
+        `SELECT s.id, s.envelope_id, e.name AS envelope_name, s.day_of_month, s.type,
+          s.amount_cents, s.note, s.enabled, s.last_run_month
+         FROM scheduled_transactions s
+         JOIN envelopes e ON e.id = s.envelope_id
+         WHERE s.id = ? AND s.user_id = ?`
+      )
+      .get(id, user.id) as
+      | {
+          id: number;
+          envelope_id: number;
+          envelope_name: string;
+          day_of_month: number;
+          type: "ebb" | "flow";
+          amount_cents: number;
+          note: string;
+          enabled: number;
+          last_run_month: string | null;
+        }
+      | undefined;
+    if (!row) {
+      res.status(500).json({ error: "Could not load schedule" });
+      return;
+    }
+    res.status(201).json({
+      schedule: {
+        id: row.id,
+        envelope_id: row.envelope_id,
+        envelope_name: row.envelope_name,
+        day_of_month: row.day_of_month,
+        type: row.type,
+        amount_cents: row.amount_cents,
+        note: row.note,
+        enabled: row.enabled === 1,
+        last_run_month: row.last_run_month,
+      },
+    });
+  });
+
+  r.patch("/api/schedules/:id", authMiddleware, (req, res) => {
+    const { user } = req as AuthedRequest;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const existing = db
+      .prepare(
+        "SELECT id, envelope_id FROM scheduled_transactions WHERE id = ? AND user_id = ?"
+      )
+      .get(id, user.id) as { id: number; envelope_id: number } | undefined;
+    if (!existing) {
+      res.status(404).json({ error: "Schedule not found" });
+      return;
+    }
+    const parsed = schedulePatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    const p = parsed.data;
+    if (Object.keys(p).length === 0) {
+      res.status(400).json({ error: "No fields to update" });
+      return;
+    }
+    const nextEnvelopeId = p.envelope_id ?? existing.envelope_id;
+    if (!getAccessibleEnvelopeId(user, nextEnvelopeId)) {
+      res.status(404).json({ error: "Envelope not found" });
+      return;
+    }
+
+    const row = db
+      .prepare(
+        `SELECT envelope_id, day_of_month, type, amount_cents, note, enabled
+         FROM scheduled_transactions WHERE id = ? AND user_id = ?`
+      )
+      .get(id, user.id) as
+      | {
+          envelope_id: number;
+          day_of_month: number;
+          type: "ebb" | "flow";
+          amount_cents: number;
+          note: string;
+          enabled: number;
+        }
+      | undefined;
+    if (!row) {
+      res.status(404).json({ error: "Schedule not found" });
+      return;
+    }
+
+    const envelope_id = p.envelope_id ?? row.envelope_id;
+    const day_of_month = p.day_of_month ?? row.day_of_month;
+    const type = p.type ?? row.type;
+    const amount_cents = p.amount_cents ?? row.amount_cents;
+    const note = p.note !== undefined ? p.note.trim() : row.note;
+    const enabled =
+      p.enabled !== undefined ? (p.enabled ? 1 : 0) : row.enabled;
+
+    db.prepare(
+      `UPDATE scheduled_transactions SET
+        envelope_id = ?, day_of_month = ?, type = ?, amount_cents = ?, note = ?, enabled = ?
+       WHERE id = ? AND user_id = ?`
+    ).run(
+      envelope_id,
+      day_of_month,
+      type,
+      amount_cents,
+      note,
+      enabled,
+      id,
+      user.id
+    );
+
+    const out = db
+      .prepare(
+        `SELECT s.id, s.envelope_id, e.name AS envelope_name, s.day_of_month, s.type,
+          s.amount_cents, s.note, s.enabled, s.last_run_month
+         FROM scheduled_transactions s
+         JOIN envelopes e ON e.id = s.envelope_id
+         WHERE s.id = ? AND s.user_id = ?`
+      )
+      .get(id, user.id) as
+      | {
+          id: number;
+          envelope_id: number;
+          envelope_name: string;
+          day_of_month: number;
+          type: "ebb" | "flow";
+          amount_cents: number;
+          note: string;
+          enabled: number;
+          last_run_month: string | null;
+        }
+      | undefined;
+    if (!out) {
+      res.status(500).json({ error: "Could not load schedule" });
+      return;
+    }
+    res.json({
+      schedule: {
+        id: out.id,
+        envelope_id: out.envelope_id,
+        envelope_name: out.envelope_name,
+        day_of_month: out.day_of_month,
+        type: out.type,
+        amount_cents: out.amount_cents,
+        note: out.note,
+        enabled: out.enabled === 1,
+        last_run_month: out.last_run_month,
+      },
+    });
+  });
+
+  r.delete("/api/schedules/:id", authMiddleware, (req, res) => {
+    const { user } = req as AuthedRequest;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const info = db
+      .prepare(
+        "DELETE FROM scheduled_transactions WHERE id = ? AND user_id = ?"
+      )
+      .run(id, user.id);
+    if (info.changes === 0) {
+      res.status(404).json({ error: "Schedule not found" });
+      return;
+    }
+    res.status(204).send();
+  });
 
   r.use((req, res, next) => {
     if (req.path.startsWith("/api")) {

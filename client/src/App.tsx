@@ -5,6 +5,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { EnvelopeDetail } from "./pages/EnvelopeDetail";
 import { Login } from "./pages/Login";
 import { ManageHousehold } from "./pages/ManageHousehold";
+import { ScheduledTransactions } from "./pages/ScheduledTransactions";
 
 function Protected({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -45,6 +46,14 @@ export function App() {
           element={
             <Protected>
               <ManageHousehold />
+            </Protected>
+          }
+        />
+        <Route
+          path="/schedules"
+          element={
+            <Protected>
+              <ScheduledTransactions />
             </Protected>
           }
         />

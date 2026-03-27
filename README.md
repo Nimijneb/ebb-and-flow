@@ -14,6 +14,7 @@ A small, self-hosted envelope budgeting app with **households** (shared budgets)
 - List envelopes with running balance (shared with the household)
 - Per-envelope transaction log (Ebb or Flow, optional note; shows who recorded each entry)
 - Delete an envelope (and its transactions)
+- **Scheduled transactions**: each user can add monthly Ebb or Flow on a chosen day of the month to any envelope they can access (shared or private); the server records them automatically in its local time zone
 - Single container: API + static web UI
 
 ## Development
