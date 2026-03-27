@@ -67,6 +67,26 @@ Open [http://localhost:4000](http://localhost:4000).
 
 Data is stored in the `envelope_budget_data` volume at `DATABASE_PATH` (`/data/envelopes.db` in the compose file).
 
+### Pre-built image (no clone)
+
+This repo can publish a **free** image to **GitHub Container Registry** (`ghcr.io`) using the workflow in `.github/workflows/docker-publish.yml`. It runs on every push to `main` (and on version tags like `v1.0.0`).
+
+1. Push `main` on GitHub and wait for the **Publish Docker image** action to finish (Actions tab).
+2. In **Packages** (your profile or org), open the `envelope-budget` package and set **visibility to Public** if you want anyone to `docker pull` without logging in.
+3. On a server, only a `.env` and compose file are needed:
+
+```bash
+curl -fsSL -o docker-compose.image.yml https://raw.githubusercontent.com/Nimijneb/envelope-budget/main/docker-compose.image.yml
+# Edit image: line if you use a fork (ghcr.io/<your-username>/envelope-budget:latest)
+echo 'JWT_SECRET=...' > .env
+echo 'ADMIN_USERNAME=...' >> .env
+echo 'ADMIN_PASSWORD=...' >> .env
+docker compose -f docker-compose.image.yml pull
+docker compose -f docker-compose.image.yml up -d
+```
+
+Open [http://localhost:4000](http://localhost:4000).
+
 ## Environment
 
 | Variable                   | Description |
