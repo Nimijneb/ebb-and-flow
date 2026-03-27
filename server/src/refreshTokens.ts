@@ -53,3 +53,10 @@ export function revokeRefreshToken(
   const h = hashRefreshToken(plainRefreshToken);
   db.prepare("DELETE FROM refresh_tokens WHERE token_hash = ?").run(h);
 }
+
+export function revokeAllRefreshTokensForUser(
+  db: Database.Database,
+  userId: number
+): void {
+  db.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId);
+}

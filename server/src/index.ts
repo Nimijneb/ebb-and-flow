@@ -1,5 +1,5 @@
 import "./config.js";
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import path from "node:path";
@@ -45,7 +45,17 @@ const corsOrigin: boolean | string | string[] =
 
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'", "data:"],
+        "connect-src": ["'self'"],
+        "object-src": ["'none'"],
+      },
+    },
   })
 );
 app.use(
@@ -68,6 +78,12 @@ if (fs.existsSync(staticDir)) {
     res.sendFile(path.join(staticDir, "index.html"));
   });
 }
+const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+  console.error("Unhandled server error:", err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: "Internal server error" });
+};
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`Envelope budget API listening on port ${PORT}`);

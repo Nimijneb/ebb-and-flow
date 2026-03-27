@@ -8,16 +8,23 @@ import { useAuth } from "../auth";
 
 export function Settings() {
   const navigate = useNavigate();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const [memberFormValid, setMemberFormValid] = useState(false);
   const [creatingMember, setCreatingMember] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [opening, setOpening] = useState("");
   const [shareWithHousehold, setShareWithHousehold] = useState(true);
   const [assignedUserId, setAssignedUserId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [regeneratingInviteCode, setRegeneratingInviteCode] = useState(false);
+  const [resetPasswordBusyId, setResetPasswordBusyId] = useState<number | null>(null);
+  const [resetPasswordDrafts, setResetPasswordDrafts] = useState<
+    Record<number, string>
+  >({});
   const [adminStatusSavingId, setAdminStatusSavingId] = useState<number | null>(
     null
   );
@@ -43,6 +50,7 @@ export function Settings() {
     if (!name.trim()) return;
     setCreating(true);
     setError(null);
+    setInfo(null);
     try {
       const body: Record<string, unknown> = {
         name: name.trim(),
@@ -82,6 +90,7 @@ export function Settings() {
     if (!user?.is_admin || !username || password.length < 8) return;
     setCreatingMember(true);
     setError(null);
+    setInfo(null);
     try {
       await api("/api/admin/users", {
         method: "POST",
@@ -105,6 +114,7 @@ export function Settings() {
     if (!user?.is_admin) return;
     setAdminStatusSavingId(memberId);
     setError(null);
+    setInfo(null);
     try {
       await api(`/api/admin/users/${memberId}`, {
         method: "PATCH",
@@ -118,6 +128,97 @@ export function Settings() {
     } finally {
       setAdminStatusSavingId(null);
     }
+  }
+
+  async function changeMyPassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const currentPassword = String(fd.get("currentPassword") ?? "");
+    const newPassword = String(fd.get("newPassword") ?? "");
+    const confirmPassword = String(fd.get("confirmPassword") ?? "");
+
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("New password and confirmation do not match.");
+      return;
+    }
+
+    setChangingPassword(true);
+    setError(null);
+    setInfo(null);
+    try {
+      await api("/api/me/password", {
+        method: "PATCH",
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      form.reset();
+      // Password change revokes active sessions; require fresh login immediately.
+      logout();
+      navigate("/login", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not change password");
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  async function regenerateInviteCode() {
+    if (!user?.is_admin) return;
+    setRegeneratingInviteCode(true);
+    setError(null);
+    setInfo(null);
+    try {
+      await api("/api/household/invite-code/regenerate", { method: "POST" });
+      await refreshUser();
+      setInfo("Invite code regenerated.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not regenerate invite code");
+    } finally {
+      setRegeneratingInviteCode(false);
+    }
+  }
+
+  async function resetMemberPassword(memberId: number) {
+    if (!user?.is_admin) return;
+    const nextPassword = (resetPasswordDrafts[memberId] ?? "").trim();
+    if (nextPassword.length < 8) {
+      setError("Reset password must be at least 8 characters.");
+      return;
+    }
+    setResetPasswordBusyId(memberId);
+    setError(null);
+    setInfo(null);
+    try {
+      await api(`/api/admin/users/${memberId}/password`, {
+        method: "PATCH",
+        body: JSON.stringify({ new_password: nextPassword }),
+      });
+      setResetPasswordDrafts((prev) => ({ ...prev, [memberId]: "" }));
+      setInfo("Password reset successfully.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reset password");
+    } finally {
+      setResetPasswordBusyId(null);
+    }
+  }
+
+  function confirmInviteCodeRegeneration(): boolean {
+    return window.confirm(
+      "Regenerate the household invite code?\n\nAnyone using the current code will no longer be able to join with it."
+    );
+  }
+
+  function confirmMemberPasswordReset(username: string): boolean {
+    return window.confirm(
+      `Reset password for ${username}?\n\nThis will sign them out of active sessions.`
+    );
   }
 
   const adminMemberCount = user?.household
@@ -160,9 +261,101 @@ export function Settings() {
             {error}
           </div>
         )}
+        {info && (
+          <div
+            className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-sm dark:border-emerald-400/60 dark:bg-emerald-950/60 dark:text-emerald-50"
+            role="status"
+          >
+            {info}
+          </div>
+        )}
 
         {user?.household && (
           <>
+            <section className="neon-panel mb-8 rounded-2xl border border-border bg-card p-4 shadow-sm sm:mb-10 sm:p-6">
+              <h2 className="font-display text-base font-semibold text-ink sm:text-lg">
+                Security
+              </h2>
+              <form onSubmit={changeMyPassword} className="mt-4 space-y-3">
+                <p className="text-sm text-muted">
+                  Change your password. You will be signed out on success.
+                </p>
+                <label className="block text-sm font-medium text-ink">
+                  Current password
+                  <input
+                    name="currentPassword"
+                    type="password"
+                    autoComplete="current-password"
+                    minLength={8}
+                    required
+                    className="input-field mt-1"
+                  />
+                </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm font-medium text-ink">
+                    New password
+                    <input
+                      name="newPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                      className="input-field mt-1"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-ink">
+                    Confirm new password
+                    <input
+                      name="confirmPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                      className="input-field mt-1"
+                    />
+                  </label>
+                </div>
+                <div className="pt-1 sm:flex sm:justify-end">
+                  <button
+                    type="submit"
+                    disabled={changingPassword}
+                    className="btn-primary w-full touch-manipulation sm:w-auto"
+                  >
+                    {changingPassword ? "Saving…" : "Change password"}
+                  </button>
+                </div>
+              </form>
+              <div className="mt-6 rounded-xl border border-border bg-paper/70 p-3 dark:bg-black/25">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                  Household invite code
+                </p>
+                <p className="mt-1 break-all font-mono text-sm text-ink">
+                  {user.household.invite_code}
+                </p>
+                {user.is_admin ? (
+                  <div className="mt-3 sm:flex sm:justify-end">
+                    <button
+                      type="button"
+                      disabled={regeneratingInviteCode}
+                      onClick={() => {
+                        if (!confirmInviteCodeRegeneration()) return;
+                        void regenerateInviteCode();
+                      }}
+                      className="btn-primary w-full touch-manipulation sm:w-auto"
+                    >
+                      {regeneratingInviteCode
+                        ? "Regenerating…"
+                        : "Regenerate invite code"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-muted">
+                    Only administrators can regenerate the invite code.
+                  </p>
+                )}
+              </div>
+            </section>
+
             <section className="neon-panel mb-8 rounded-2xl border border-border bg-card p-4 shadow-sm sm:mb-10 sm:p-6">
               <h2 className="font-display text-base font-semibold text-ink sm:text-lg">
                 <HelpPopover
@@ -396,37 +589,75 @@ export function Settings() {
                     return (
                       <li
                         key={m.id}
-                        className="flex max-w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-paper px-3 py-2.5 text-sm text-ink dark:border-[rgba(0,245,255,0.55)] dark:bg-black/40 dark:shadow-[0_0_20px_rgba(0,240,255,0.45),0_0_40px_rgba(200,79,255,0.2)]"
+                        className="max-w-full rounded-xl border border-border bg-paper px-3 py-2.5 text-sm text-ink dark:border-[rgba(0,245,255,0.55)] dark:bg-black/40 dark:shadow-[0_0_20px_rgba(0,240,255,0.45),0_0_40px_rgba(200,79,255,0.2)]"
                       >
-                        <span className="min-w-0 break-all">
-                          <span className="font-medium">{m.username}</span>
-                          {m.is_admin ? (
-                            <span className="ml-1.5 text-xs font-medium text-accent">
-                              admin
-                            </span>
+                        <div className="flex max-w-full flex-wrap items-center justify-between gap-3">
+                          <span className="min-w-0 break-all">
+                            <span className="font-medium">{m.username}</span>
+                            {m.is_admin ? (
+                              <span className="ml-1.5 text-xs font-medium text-accent">
+                                admin
+                              </span>
+                            ) : null}
+                            {m.id === user.id ? (
+                              <span className="ml-1 text-muted">(you)</span>
+                            ) : null}
+                          </span>
+                          {user.is_admin ? (
+                            <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 shrink-0 accent-accent disabled:cursor-not-allowed disabled:opacity-60"
+                                checked={m.is_admin}
+                                disabled={saving || lockLastAdmin}
+                                title={
+                                  lockLastAdmin
+                                    ? "Promote another administrator before removing the last one."
+                                    : undefined
+                                }
+                                onChange={(e) => {
+                                  void setMemberAdmin(m.id, e.target.checked);
+                                }}
+                              />
+                              <span className="text-ink">Administrator</span>
+                            </label>
                           ) : null}
-                          {m.id === user.id ? (
-                            <span className="ml-1 text-muted">(you)</span>
-                          ) : null}
-                        </span>
+                        </div>
                         {user.is_admin ? (
-                          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs text-muted">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 shrink-0 accent-accent disabled:cursor-not-allowed disabled:opacity-60"
-                              checked={m.is_admin}
-                              disabled={saving || lockLastAdmin}
-                              title={
-                                lockLastAdmin
-                                  ? "Promote another administrator before removing the last one."
-                                  : undefined
+                          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+                            <label className="block min-w-0 flex-1 text-xs font-medium uppercase tracking-wide text-muted">
+                              Reset password
+                              <input
+                                type="password"
+                                minLength={8}
+                                placeholder="New temporary password"
+                                value={resetPasswordDrafts[m.id] ?? ""}
+                                onChange={(e) =>
+                                  setResetPasswordDrafts((prev) => ({
+                                    ...prev,
+                                    [m.id]: e.target.value,
+                                  }))
+                                }
+                                className="input-field mt-1 normal-case tracking-normal"
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              disabled={
+                                resetPasswordBusyId === m.id ||
+                                (resetPasswordDrafts[m.id] ?? "").trim().length < 8
                               }
-                              onChange={(e) => {
-                                void setMemberAdmin(m.id, e.target.checked);
+                              onClick={() => {
+                                if (!confirmMemberPasswordReset(m.username)) return;
+                                void resetMemberPassword(m.id);
                               }}
-                            />
-                            <span className="text-ink">Administrator</span>
-                          </label>
+                              className="btn-primary w-full touch-manipulation sm:w-auto"
+                            >
+                              {resetPasswordBusyId === m.id
+                                ? "Resetting…"
+                                : "Reset password"}
+                            </button>
+                          </div>
                         ) : null}
                       </li>
                     );

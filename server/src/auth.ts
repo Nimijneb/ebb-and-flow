@@ -7,6 +7,7 @@ export type JwtPayload = {
   username: string;
   /** Present on new tokens; legacy tokens may use `email` */
   householdId?: number;
+  tv?: number;
 };
 
 function payloadUsername(decoded: object): string | null {
@@ -20,9 +21,10 @@ function payloadUsername(decoded: object): string | null {
 export function signToken(
   userId: number,
   username: string,
-  householdId: number
+  householdId: number,
+  tokenVersion: number
 ): string {
-  return jwt.sign({ sub: userId, username, householdId }, JWT_SECRET, {
+  return jwt.sign({ sub: userId, username, householdId, tv: tokenVersion }, JWT_SECRET, {
     expiresIn: "4h",
   });
 }
@@ -46,8 +48,15 @@ export function verifyToken(token: string): JwtPayload | null {
           : typeof hid === "string" && /^\d+$/.test(hid)
             ? Number(hid)
             : undefined;
+      const tv = (decoded as { tv?: unknown }).tv;
+      const tokenVersion =
+        typeof tv === "number" && Number.isInteger(tv) && tv >= 0
+          ? tv
+          : typeof tv === "string" && /^\d+$/.test(tv)
+            ? Number(tv)
+            : 0;
       if (Number.isFinite(id) && username) {
-        return { sub: id, username, householdId };
+        return { sub: id, username, householdId, tv: tokenVersion };
       }
     }
     return null;

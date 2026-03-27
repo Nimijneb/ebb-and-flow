@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { newInviteCode } from "./invite.js";
 
 const dbPath = process.env.DATABASE_PATH ?? path.join(process.cwd(), "data", "envelopes.db");
+process.umask(0o077);
 
 export function getDbPath(): string {
   return dbPath;
@@ -13,8 +14,14 @@ export function openDb(): Database.Database {
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+    fs.chmodSync(dir, 0o700);
   }
   const db = new Database(dbPath);
+  try {
+    fs.chmodSync(dbPath, 0o600);
+  } catch {
+    // Best-effort hardening for hosts with restrictive FS/ACL behavior.
+  }
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   migrate(db);
@@ -66,6 +73,7 @@ function migrate(db: Database.Database): void {
   migrateRefreshTokens(db);
   migrateDashboardEnvelopeOrder(db);
   migrateEnvelopeAssignedUser(db);
+  migrateUserTokenVersion(db);
 }
 
 /** Shared = visible to whole household; private = only creator (same household). */
@@ -243,5 +251,15 @@ function migrateEnvelopeAssignedUser(db: Database.Database): void {
     db.prepare(
       "UPDATE envelopes SET assigned_user_id = user_id WHERE is_shared = 1 AND assigned_user_id IS NULL"
     ).run();
+  }
+}
+
+/** Monotonic session version; bump to invalidate all existing access tokens. */
+function migrateUserTokenVersion(db: Database.Database): void {
+  const userCols = tableInfo(db, "users");
+  if (!userCols.some((c) => c.name === "token_version")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
+    );
   }
 }

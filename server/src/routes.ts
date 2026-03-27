@@ -15,6 +15,7 @@ import {
   replaceUserRefreshTokens,
   rotateRefreshToken,
   revokeRefreshToken,
+  revokeAllRefreshTokensForUser,
 } from "./refreshTokens.js";
 
 /** 1–64 chars, no spaces (stored lowercase). Printable characters allowed. */
@@ -100,6 +101,15 @@ const createMemberSchema = z.object({
 
 const patchMemberAdminSchema = z.object({
   is_admin: z.boolean(),
+});
+
+const patchPasswordSchema = z.object({
+  current_password: z.string().min(8).max(128),
+  new_password: z.string().min(8).max(128),
+});
+
+const adminResetPasswordSchema = z.object({
+  new_password: z.string().min(8).max(128),
 });
 
 const scheduleCreateSchema = z.object({
@@ -223,12 +233,23 @@ function createAuthMiddleware(db: Database.Database) {
       return;
     }
     const urow = db
-      .prepare("SELECT household_id, is_admin, username FROM users WHERE id = ?")
+      .prepare(
+        "SELECT household_id, is_admin, username, token_version FROM users WHERE id = ?"
+      )
       .get(payload.sub) as
-      | { household_id: number | null; is_admin: number; username: string }
+      | {
+          household_id: number | null;
+          is_admin: number;
+          username: string;
+          token_version: number;
+        }
       | undefined;
     if (!urow || urow.household_id == null) {
       res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if ((payload.tv ?? 0) !== urow.token_version) {
+      res.status(401).json({ error: "Invalid or expired token" });
       return;
     }
     const householdId = urow.household_id;
@@ -309,113 +330,127 @@ export function createRouter(db: Database.Database): Router {
     "/api/auth/register",
     registerRouteLimiter,
     authRouteLimiter,
-    (req, res) => {
-    if (!allowOpenRegistration) {
-      res.status(403).json({
-        error: "Registration is disabled. Ask your administrator for an account.",
-      });
-      return;
-    }
-    const parsed = registerSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.flatten() });
-      return;
-    }
-    const { username, password } = parsed.data;
-    const userNorm = username.trim().toLowerCase();
-    const rawInvite = parsed.data.invite_code;
-    const inviteNorm =
-      rawInvite && rawInvite.trim().length > 0
-        ? normalizeInviteCode(rawInvite)
-        : undefined;
+    async (req, res, next) => {
+      try {
+        if (!allowOpenRegistration) {
+          res.status(403).json({
+            error: "Registration is disabled. Ask your administrator for an account.",
+          });
+          return;
+        }
+        const parsed = registerSchema.safeParse(req.body);
+        if (!parsed.success) {
+          res.status(400).json({ error: parsed.error.flatten() });
+          return;
+        }
+        const { username, password } = parsed.data;
+        const userNorm = username.trim().toLowerCase();
+        const rawInvite = parsed.data.invite_code;
+        const inviteNorm =
+          rawInvite && rawInvite.trim().length > 0
+            ? normalizeInviteCode(rawInvite)
+            : undefined;
 
-    if (inviteNorm !== undefined && !/^[a-f0-9]{12}$/.test(inviteNorm)) {
-      res.status(400).json({ error: "Invite code must be 12 hex characters" });
-      return;
-    }
+        if (inviteNorm !== undefined && !/^[a-f0-9]{12,64}$/.test(inviteNorm)) {
+          res.status(400).json({ error: "Invite code must be 12-64 hex characters" });
+          return;
+        }
 
-    let householdId: number;
-    if (inviteNorm) {
-      const h = db
-        .prepare("SELECT id FROM households WHERE invite_code = ?")
-        .get(inviteNorm) as { id: number } | undefined;
-      if (!h) {
-        res.status(400).json({ error: "Invalid invite code" });
-        return;
+        let householdId: number;
+        if (inviteNorm) {
+          const h = db
+            .prepare("SELECT id FROM households WHERE invite_code = ?")
+            .get(inviteNorm) as { id: number } | undefined;
+          if (!h) {
+            res.status(400).json({ error: "Invalid invite code" });
+            return;
+          }
+          householdId = h.id;
+        } else {
+          const code = newInviteCode();
+          const info = db
+            .prepare("INSERT INTO households (name, invite_code) VALUES (?, ?)")
+            .run("Home", code);
+          householdId = Number(info.lastInsertRowid);
+        }
+
+        const hash = await bcrypt.hash(password, 12);
+        try {
+          const stmt = db.prepare(
+            "INSERT INTO users (username, password_hash, household_id) VALUES (?, ?, ?)"
+          );
+          const info = stmt.run(userNorm, hash, householdId);
+          const id = Number(info.lastInsertRowid);
+          const token = signToken(id, userNorm, householdId, 0);
+          const refreshToken = replaceUserRefreshTokens(db, id);
+          res.status(201).json({
+            token,
+            refreshToken,
+            user: userMePayload(db, id, userNorm, householdId),
+          });
+        } catch (e: unknown) {
+          if (
+            e &&
+            typeof e === "object" &&
+            "code" in e &&
+            e.code === "SQLITE_CONSTRAINT_UNIQUE"
+          ) {
+            res.status(409).json({ error: "That username is already taken." });
+            return;
+          }
+          throw e;
+        }
+      } catch (err) {
+        next(err);
       }
-      householdId = h.id;
-    } else {
-      const code = newInviteCode();
-      const info = db
-        .prepare("INSERT INTO households (name, invite_code) VALUES (?, ?)")
-        .run("Home", code);
-      householdId = Number(info.lastInsertRowid);
     }
-
-    const hash = bcrypt.hashSync(password, 12);
-    try {
-      const stmt = db.prepare(
-        "INSERT INTO users (username, password_hash, household_id) VALUES (?, ?, ?)"
-      );
-      const info = stmt.run(userNorm, hash, householdId);
-      const id = Number(info.lastInsertRowid);
-      const token = signToken(id, userNorm, householdId);
-      const refreshToken = replaceUserRefreshTokens(db, id);
-      res.status(201).json({
-        token,
-        refreshToken,
-        user: userMePayload(db, id, userNorm, householdId),
-      });
-    } catch (e: unknown) {
-      if (
-        e &&
-        typeof e === "object" &&
-        "code" in e &&
-        e.code === "SQLITE_CONSTRAINT_UNIQUE"
-      ) {
-        res.status(409).json({ error: "That username is already taken." });
-        return;
-      }
-      throw e;
-    }
-  }
   );
 
-  r.post("/api/auth/login", authRouteLimiter, (req, res) => {
-    const parsed = loginSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.flatten() });
-      return;
+  r.post("/api/auth/login", authRouteLimiter, async (req, res, next) => {
+    try {
+      const parsed = loginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.flatten() });
+        return;
+      }
+      const { username, password } = parsed.data;
+      const userNorm = username.trim().toLowerCase();
+      const row = db
+        .prepare(
+          "SELECT id, username, password_hash, household_id, token_version FROM users WHERE username = ?"
+        )
+        .get(userNorm) as
+        | {
+            id: number;
+            username: string;
+            password_hash: string;
+            household_id: number | null;
+            token_version: number;
+          }
+        | undefined;
+      if (!row || !(await bcrypt.compare(password, row.password_hash))) {
+        res.status(401).json({ error: "Invalid username or password" });
+        return;
+      }
+      if (row.household_id == null) {
+        res.status(500).json({ error: "Account data incomplete" });
+        return;
+      }
+      const token = signToken(
+        row.id,
+        row.username,
+        row.household_id,
+        row.token_version
+      );
+      const refreshToken = replaceUserRefreshTokens(db, row.id);
+      res.json({
+        token,
+        refreshToken,
+        user: userMePayload(db, row.id, row.username, row.household_id),
+      });
+    } catch (err) {
+      next(err);
     }
-    const { username, password } = parsed.data;
-    const userNorm = username.trim().toLowerCase();
-    const row = db
-      .prepare(
-        "SELECT id, username, password_hash, household_id FROM users WHERE username = ?"
-      )
-      .get(userNorm) as
-      | {
-          id: number;
-          username: string;
-          password_hash: string;
-          household_id: number | null;
-        }
-      | undefined;
-    if (!row || !bcrypt.compareSync(password, row.password_hash)) {
-      res.status(401).json({ error: "Invalid username or password" });
-      return;
-    }
-    if (row.household_id == null) {
-      res.status(500).json({ error: "Account data incomplete" });
-      return;
-    }
-    const token = signToken(row.id, row.username, row.household_id);
-    const refreshToken = replaceUserRefreshTokens(db, row.id);
-    res.json({
-      token,
-      refreshToken,
-      user: userMePayload(db, row.id, row.username, row.household_id),
-    });
   });
 
   r.post("/api/auth/refresh", authRouteLimiter, (req, res) => {
@@ -430,9 +465,9 @@ export function createRouter(db: Database.Database): Router {
       return;
     }
     const urow = db
-      .prepare("SELECT username, household_id FROM users WHERE id = ?")
+      .prepare("SELECT username, household_id, token_version FROM users WHERE id = ?")
       .get(rotated.userId) as
-      | { username: string; household_id: number | null }
+      | { username: string; household_id: number | null; token_version: number }
       | undefined;
     if (!urow?.household_id) {
       res.status(401).json({ error: "Unauthorized" });
@@ -441,7 +476,8 @@ export function createRouter(db: Database.Database): Router {
     const token = signToken(
       rotated.userId,
       urow.username,
-      urow.household_id
+      urow.household_id,
+      urow.token_version
     );
     res.json({
       token,
@@ -458,10 +494,26 @@ export function createRouter(db: Database.Database): Router {
     if (parsed.data.refreshToken) {
       revokeRefreshToken(db, parsed.data.refreshToken);
     }
+    const header = req.headers.authorization;
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+    if (token) {
+      const payload = verifyToken(token);
+      if (payload) {
+        const urow = db
+          .prepare("SELECT token_version FROM users WHERE id = ?")
+          .get(payload.sub) as { token_version: number } | undefined;
+        if (urow && (payload.tv ?? 0) === urow.token_version) {
+          db.prepare(
+            "UPDATE users SET token_version = token_version + 1 WHERE id = ?"
+          ).run(payload.sub);
+          revokeAllRefreshTokensForUser(db, payload.sub);
+        }
+      }
+    }
     res.status(204).end();
   });
 
-  r.post("/api/admin/users", authMiddleware, (req, res) => {
+  r.post("/api/admin/users", authMiddleware, async (req, res, next) => {
     const { user } = req as AuthedRequest;
     if (!user.isAdmin) {
       res.status(403).json({ error: "Only an administrator can create accounts." });
@@ -474,30 +526,34 @@ export function createRouter(db: Database.Database): Router {
     }
     const { username, password, is_admin: makeAdmin } = parsed.data;
     const userNorm = username.trim().toLowerCase();
-    const hash = bcrypt.hashSync(password, 12);
-    const adminFlag = makeAdmin === true ? 1 : 0;
     try {
-      const info = db
-        .prepare(
-          `INSERT INTO users (username, password_hash, household_id, is_admin)
-          VALUES (?, ?, ?, ?)`
-        )
-        .run(userNorm, hash, user.householdId, adminFlag);
-      const id = Number(info.lastInsertRowid);
-      res.status(201).json({
-        user: { id, username: userNorm, is_admin: adminFlag === 1 },
-      });
-    } catch (e: unknown) {
-      if (
-        e &&
-        typeof e === "object" &&
-        "code" in e &&
-        e.code === "SQLITE_CONSTRAINT_UNIQUE"
-      ) {
-        res.status(409).json({ error: "That username is already taken." });
-        return;
+      const hash = await bcrypt.hash(password, 12);
+      const adminFlag = makeAdmin === true ? 1 : 0;
+      try {
+        const info = db
+          .prepare(
+            `INSERT INTO users (username, password_hash, household_id, is_admin)
+            VALUES (?, ?, ?, ?)`
+          )
+          .run(userNorm, hash, user.householdId, adminFlag);
+        const id = Number(info.lastInsertRowid);
+        res.status(201).json({
+          user: { id, username: userNorm, is_admin: adminFlag === 1 },
+        });
+      } catch (e: unknown) {
+        if (
+          e &&
+          typeof e === "object" &&
+          "code" in e &&
+          e.code === "SQLITE_CONSTRAINT_UNIQUE"
+        ) {
+          res.status(409).json({ error: "That username is already taken." });
+          return;
+        }
+        throw e;
       }
-      throw e;
+    } catch (err) {
+      next(err);
     }
   });
 
@@ -567,11 +623,90 @@ export function createRouter(db: Database.Database): Router {
     });
   });
 
+  r.patch(
+    "/api/admin/users/:id/password",
+    authMiddleware,
+    async (req, res, next) => {
+      try {
+        const { user } = req as AuthedRequest;
+        if (!user.isAdmin) {
+          res
+            .status(403)
+            .json({ error: "Only an administrator can reset passwords." });
+          return;
+        }
+        const targetId = Number(req.params.id);
+        if (!Number.isInteger(targetId) || targetId <= 0) {
+          res.status(400).json({ error: "Invalid user id." });
+          return;
+        }
+        const parsed = adminResetPasswordSchema.safeParse(req.body);
+        if (!parsed.success) {
+          res.status(400).json({ error: parsed.error.flatten() });
+          return;
+        }
+        const target = db
+          .prepare("SELECT id, household_id FROM users WHERE id = ?")
+          .get(targetId) as { id: number; household_id: number | null } | undefined;
+        if (!target || target.household_id !== user.householdId) {
+          res.status(404).json({ error: "User not found in your household." });
+          return;
+        }
+        const hash = await bcrypt.hash(parsed.data.new_password, 12);
+        db.prepare(
+          "UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?"
+        ).run(hash, targetId);
+        revokeAllRefreshTokensForUser(db, targetId);
+        res.status(204).end();
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
   r.get("/api/me", authMiddleware, (req, res) => {
     const { user } = req as AuthedRequest;
     res.json({
       user: userMePayload(db, user.id, user.username, user.householdId),
     });
+  });
+
+  r.patch("/api/me/password", authMiddleware, async (req, res, next) => {
+    try {
+      const { user } = req as AuthedRequest;
+      const parsed = patchPasswordSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.flatten() });
+        return;
+      }
+      const { current_password, new_password } = parsed.data;
+      if (current_password === new_password) {
+        res.status(400).json({
+          error: "New password must be different from the current password.",
+        });
+        return;
+      }
+      const row = db
+        .prepare("SELECT password_hash FROM users WHERE id = ?")
+        .get(user.id) as { password_hash: string } | undefined;
+      if (!row) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+      const ok = await bcrypt.compare(current_password, row.password_hash);
+      if (!ok) {
+        res.status(401).json({ error: "Current password is incorrect." });
+        return;
+      }
+      const nextHash = await bcrypt.hash(new_password, 12);
+      db.prepare(
+        "UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?"
+      ).run(nextHash, user.id);
+      revokeAllRefreshTokensForUser(db, user.id);
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
   });
 
   r.put("/api/me/dashboard-envelope-order", authMiddleware, (req, res) => {
@@ -632,6 +767,40 @@ export function createRouter(db: Database.Database): Router {
     );
     const household = householdPayload(db, user.householdId);
     res.json({ household });
+  });
+
+  r.post("/api/household/invite-code/regenerate", authMiddleware, (req, res) => {
+    const { user } = req as AuthedRequest;
+    if (!user.isAdmin) {
+      res.status(403).json({
+        error: "Only a household administrator can regenerate invite codes.",
+      });
+      return;
+    }
+    let code = newInviteCode();
+    for (let i = 0; i < 5; i += 1) {
+      try {
+        db.prepare("UPDATE households SET invite_code = ? WHERE id = ?").run(
+          code,
+          user.householdId
+        );
+        const household = householdPayload(db, user.householdId);
+        res.json({ household });
+        return;
+      } catch (e: unknown) {
+        if (
+          e &&
+          typeof e === "object" &&
+          "code" in e &&
+          e.code === "SQLITE_CONSTRAINT_UNIQUE"
+        ) {
+          code = newInviteCode();
+          continue;
+        }
+        throw e;
+      }
+    }
+    res.status(500).json({ error: "Could not regenerate invite code." });
   });
 
   r.get("/api/envelopes", authMiddleware, (req, res) => {
@@ -1237,14 +1406,14 @@ export function createRouter(db: Database.Database): Router {
     });
   });
 
-  function transactionBelongsToAccessibleEnvelope(
+  function transactionCanBeMutatedByUser(
     txId: number,
     envelopeId: number,
     user: AuthedRequest["user"]
   ): boolean {
     const row = db
       .prepare(
-        `SELECT t.id, e.user_id, e.owner_user_id, e.assigned_user_id, e.is_shared FROM transactions t
+        `SELECT t.id, t.user_id AS tx_user_id, e.user_id, e.owner_user_id, e.assigned_user_id, e.is_shared FROM transactions t
          JOIN envelopes e ON e.id = t.envelope_id
          WHERE t.id = ? AND t.envelope_id = ? AND e.household_id = ?
            AND (e.is_shared = 1 OR e.user_id = ?)`
@@ -1252,6 +1421,7 @@ export function createRouter(db: Database.Database): Router {
       .get(txId, envelopeId, user.householdId, user.id) as
       | {
           id: number;
+          tx_user_id: number;
           user_id: number;
           owner_user_id: number | null;
           assigned_user_id: number | null;
@@ -1262,7 +1432,8 @@ export function createRouter(db: Database.Database): Router {
     const viewOk =
       row.is_shared === 1 || row.user_id === user.id;
     if (!viewOk) return false;
-    return canEditEnvelope(user, row);
+    if (!canEditEnvelope(user, row)) return false;
+    return user.isAdmin || row.tx_user_id === user.id;
   }
 
   r.patch(
@@ -1276,7 +1447,7 @@ export function createRouter(db: Database.Database): Router {
         res.status(400).json({ error: "Invalid id" });
         return;
       }
-      if (!transactionBelongsToAccessibleEnvelope(txId, envelopeId, user)) {
+      if (!transactionCanBeMutatedByUser(txId, envelopeId, user)) {
         res.status(404).json({ error: "Transaction not found" });
         return;
       }
@@ -1342,7 +1513,7 @@ export function createRouter(db: Database.Database): Router {
         res.status(400).json({ error: "Invalid id" });
         return;
       }
-      if (!transactionBelongsToAccessibleEnvelope(txId, envelopeId, user)) {
+      if (!transactionCanBeMutatedByUser(txId, envelopeId, user)) {
         res.status(404).json({ error: "Transaction not found" });
         return;
       }
