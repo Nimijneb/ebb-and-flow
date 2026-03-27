@@ -32,9 +32,11 @@ npm run dev
 Create a `.env` in the repo root or under `server/`:
 
 ```env
-JWT_SECRET=your-long-random-secret-at-least-16-chars
+JWT_SECRET=your-long-random-secret-at-least-32-chars
 ADMIN_USERNAME=your-admin-username
 ADMIN_PASSWORD=your-initial-admin-password
+# Optional: comma-separated browser origins if the UI is not same-origin as the API (default: same-origin only)
+# CORS_ORIGIN=https://budget.example.com
 ```
 
 `ADMIN_EMAIL` is still accepted as a fallback for the admin username if `ADMIN_USERNAME` is unset.

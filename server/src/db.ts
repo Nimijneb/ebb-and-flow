@@ -62,6 +62,7 @@ function migrate(db: Database.Database): void {
   migrateHouseholds(db);
   migrateEnvelopeShared(db);
   migrateScheduledTransactions(db);
+  migrateRefreshTokens(db);
 }
 
 /** Shared = visible to whole household; private = only creator (same household). */
@@ -100,7 +101,38 @@ function migrateScheduledTransactions(db: Database.Database): void {
   }
 }
 
+function migrateRefreshTokens(db: Database.Database): void {
+  const t = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='refresh_tokens'"
+    )
+    .get() as { name: string } | undefined;
+  if (!t) {
+    db.exec(`
+      CREATE TABLE refresh_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_refresh_user ON refresh_tokens(user_id);
+    `);
+  }
+}
+
+const TABLE_INFO_ALLOWLIST = new Set([
+  "users",
+  "households",
+  "envelopes",
+  "transactions",
+  "scheduled_transactions",
+]);
+
 function tableInfo(db: Database.Database, name: string): { name: string }[] {
+  if (!TABLE_INFO_ALLOWLIST.has(name)) {
+    throw new Error(`tableInfo: disallowed table name "${name}"`);
+  }
   return db.pragma(`table_info(${name})`) as { name: string }[];
 }
 

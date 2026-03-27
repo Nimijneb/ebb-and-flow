@@ -14,11 +14,13 @@ RUN rm -rf server/public && cp -r client/dist server/public
 
 FROM node:22-alpine AS runner
 WORKDIR /app
+RUN addgroup -S app && adduser -S app -G app
 ENV NODE_ENV=production
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/server/package.json ./server/package.json
-COPY --from=build /app/server/dist ./server/dist
-COPY --from=build /app/server/public ./server/public
+COPY --from=deps --chown=app:app /app/node_modules ./node_modules
+COPY --from=build --chown=app:app /app/server/package.json ./server/package.json
+COPY --from=build --chown=app:app /app/server/dist ./server/dist
+COPY --from=build --chown=app:app /app/server/public ./server/public
 EXPOSE 4000
 WORKDIR /app/server
+USER app
 CMD ["node", "dist/index.js"]

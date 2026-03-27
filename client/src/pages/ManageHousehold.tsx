@@ -157,31 +157,39 @@ export function ManageHousehold() {
               create one below. New member accounts are created by an
               administrator, not a public sign-up page.
             </p>
-            <form
-              onSubmit={saveHouseholdName}
-              className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"
-            >
-              <label className="block min-w-0 flex-1 text-sm font-medium text-ink">
-                Name
-                <input
-                  value={householdName}
-                  onChange={(e) => setHouseholdName(e.target.value)}
-                  placeholder="The Smith family"
-                  className="input-field mt-1"
-                />
-              </label>
-              <button
-                type="submit"
-                disabled={
-                  savingName ||
-                  !householdName.trim() ||
-                  householdName.trim() === user.household.name
-                }
-                className="btn-secondary w-full shrink-0 sm:w-auto"
+            {user.is_admin ? (
+              <form
+                onSubmit={saveHouseholdName}
+                className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"
               >
-                {savingName ? "Saving…" : "Save name"}
-              </button>
-            </form>
+                <label className="block min-w-0 flex-1 text-sm font-medium text-ink">
+                  Name
+                  <input
+                    value={householdName}
+                    onChange={(e) => setHouseholdName(e.target.value)}
+                    placeholder="The Smith family"
+                    className="input-field mt-1"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={
+                    savingName ||
+                    !householdName.trim() ||
+                    householdName.trim() === user.household.name
+                  }
+                  className="btn-secondary w-full shrink-0 sm:w-auto"
+                >
+                  {savingName ? "Saving…" : "Save name"}
+                </button>
+              </form>
+            ) : (
+              <p className="mt-4 text-sm text-muted">
+                Household name:{" "}
+                <span className="font-medium text-ink">{user.household.name}</span>
+                . Only an administrator can rename the household.
+              </p>
+            )}
             {user.is_admin ? (
               <form
                 onSubmit={createFamilyAccount}

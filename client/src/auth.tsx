@@ -7,7 +7,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, getToken, setToken } from "./api";
+import {
+  api,
+  getToken,
+  getRefreshToken,
+  setToken,
+  setRefreshToken,
+} from "./api";
 
 export type Household = {
   id: number;
@@ -53,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await refreshUser();
     } catch {
       setToken(null);
+      setRefreshToken(null);
       setUser(null);
     } finally {
       setLoading(false);
@@ -64,16 +71,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(async (username: string, password: string) => {
-    const { token, user: u } = await api<{ token: string; user: User }>(
-      "/api/auth/login",
-      { method: "POST", body: JSON.stringify({ username, password }) }
-    );
+    const { token, refreshToken, user: u } = await api<{
+      token: string;
+      refreshToken: string;
+      user: User;
+    }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
     setToken(token);
+    setRefreshToken(refreshToken);
     setUser(u);
   }, []);
 
   const logout = useCallback(() => {
+    const rt = getRefreshToken();
+    void api("/api/auth/logout", {
+      method: "POST",
+      body: JSON.stringify(rt ? { refreshToken: rt } : {}),
+    }).catch(() => {
+      /* ignore network errors on logout */
+    });
     setToken(null);
+    setRefreshToken(null);
     setUser(null);
   }, []);
 

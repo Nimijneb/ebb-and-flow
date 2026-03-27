@@ -1,6 +1,7 @@
-import dotenv from "dotenv";
+import "./config.js";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -10,13 +11,13 @@ import { runDueSchedules } from "./schedule.js";
 import { seedAdminFromEnv } from "./seed.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Default dotenv only reads `cwd/.env`; dev often runs from `server/` so root `.env` is missed.
-const envAtRepoRoot = path.resolve(__dirname, "..", "..", ".env");
-const envAtServer = path.resolve(__dirname, "..", ".env");
-dotenv.config({ path: envAtRepoRoot });
-dotenv.config({ path: envAtServer });
-dotenv.config();
 const PORT = Number(process.env.PORT) || 4000;
+
+if (process.env.ALLOW_OPEN_REGISTRATION === "true") {
+  console.warn(
+    "SECURITY WARNING: ALLOW_OPEN_REGISTRATION is enabled. Anyone can create accounts and households. Use only in trusted development environments; disable in production."
+  );
+}
 
 const db = openDb();
 seedAdminFromEnv(db);
@@ -33,9 +34,23 @@ if (
   );
 }
 const app = express();
+
+const corsOriginRaw = process.env.CORS_ORIGIN;
+const corsOrigin: boolean | string | string[] =
+  corsOriginRaw === undefined || corsOriginRaw === ""
+    ? false
+    : corsOriginRaw.includes(",")
+      ? corsOriginRaw.split(",").map((s) => s.trim())
+      : corsOriginRaw;
+
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+  })
+);
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN ?? true,
+    origin: corsOrigin,
     credentials: true,
   })
 );
@@ -57,6 +72,11 @@ if (fs.existsSync(staticDir)) {
 app.listen(PORT, () => {
   console.log(`Envelope budget API listening on port ${PORT}`);
   console.log(`Database: ${getDbPath()}`);
+  if (corsOrigin === false) {
+    console.log(
+      "CORS: disabled (same-origin only). Set CORS_ORIGIN to allow other browser origins."
+    );
+  }
 });
 
 /** Run monthly schedules on an interval (server local date). */

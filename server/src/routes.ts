@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { Router } from "express";
 import bcrypt from "bcrypt";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import type Database from "better-sqlite3";
 import {
@@ -10,6 +11,11 @@ import {
   type AuthedRequest,
 } from "./auth.js";
 import { newInviteCode, normalizeInviteCode } from "./invite.js";
+import {
+  replaceUserRefreshTokens,
+  rotateRefreshToken,
+  revokeRefreshToken,
+} from "./refreshTokens.js";
 
 /** 1–64 chars, no spaces (stored lowercase). Printable characters allowed. */
 const usernameSchema = z
@@ -96,6 +102,30 @@ const schedulePatchSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+const refreshBodySchema = z.object({
+  refreshToken: z.string().min(1).max(512),
+});
+
+const logoutBodySchema = z.object({
+  refreshToken: z.string().min(1).max(512).optional(),
+});
+
+const authRouteLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests; try again shortly." },
+});
+
+const registerRouteLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many registration attempts; try again shortly." },
+});
+
 function createAuthMiddleware(db: Database.Database) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const header = req.headers.authorization;
@@ -114,24 +144,14 @@ function createAuthMiddleware(db: Database.Database) {
       .get(payload.sub) as
       | { household_id: number | null; is_admin: number; username: string }
       | undefined;
-    if (!urow) {
+    if (!urow || urow.household_id == null) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    let householdId = payload.householdId;
-    if (typeof householdId !== "number" || !Number.isFinite(householdId)) {
-      householdId = urow.household_id ?? undefined;
-    }
-    if (typeof householdId !== "number" || !Number.isFinite(householdId)) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-    if (urow.household_id != null && urow.household_id !== householdId) {
-      householdId = urow.household_id;
-    }
+    const householdId = urow.household_id;
     const isAdmin = urow.is_admin === 1;
     (req as AuthedRequest).user = attachUserFromToken(
-      { ...payload, username: urow.username },
+      { ...payload, username: urow.username, householdId },
       householdId,
       isAdmin
     );
@@ -202,7 +222,11 @@ export function createRouter(db: Database.Database): Router {
   const authMiddleware = createAuthMiddleware(db);
   const allowOpenRegistration = process.env.ALLOW_OPEN_REGISTRATION === "true";
 
-  r.post("/api/auth/register", (req, res) => {
+  r.post(
+    "/api/auth/register",
+    registerRouteLimiter,
+    authRouteLimiter,
+    (req, res) => {
     if (!allowOpenRegistration) {
       res.status(403).json({
         error: "Registration is disabled. Ask your administrator for an account.",
@@ -253,8 +277,10 @@ export function createRouter(db: Database.Database): Router {
       const info = stmt.run(userNorm, hash, householdId);
       const id = Number(info.lastInsertRowid);
       const token = signToken(id, userNorm, householdId);
+      const refreshToken = replaceUserRefreshTokens(db, id);
       res.status(201).json({
         token,
+        refreshToken,
         user: userMePayload(db, id, userNorm, householdId),
       });
     } catch (e: unknown) {
@@ -269,9 +295,10 @@ export function createRouter(db: Database.Database): Router {
       }
       throw e;
     }
-  });
+  }
+  );
 
-  r.post("/api/auth/login", (req, res) => {
+  r.post("/api/auth/login", authRouteLimiter, (req, res) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.flatten() });
@@ -300,10 +327,55 @@ export function createRouter(db: Database.Database): Router {
       return;
     }
     const token = signToken(row.id, row.username, row.household_id);
+    const refreshToken = replaceUserRefreshTokens(db, row.id);
     res.json({
       token,
+      refreshToken,
       user: userMePayload(db, row.id, row.username, row.household_id),
     });
+  });
+
+  r.post("/api/auth/refresh", authRouteLimiter, (req, res) => {
+    const parsed = refreshBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    const rotated = rotateRefreshToken(db, parsed.data.refreshToken);
+    if (!rotated) {
+      res.status(401).json({ error: "Invalid or expired refresh token" });
+      return;
+    }
+    const urow = db
+      .prepare("SELECT username, household_id FROM users WHERE id = ?")
+      .get(rotated.userId) as
+      | { username: string; household_id: number | null }
+      | undefined;
+    if (!urow?.household_id) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const token = signToken(
+      rotated.userId,
+      urow.username,
+      urow.household_id
+    );
+    res.json({
+      token,
+      refreshToken: rotated.newRefreshPlain,
+    });
+  });
+
+  r.post("/api/auth/logout", authRouteLimiter, (req, res) => {
+    const parsed = logoutBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    if (parsed.data.refreshToken) {
+      revokeRefreshToken(db, parsed.data.refreshToken);
+    }
+    res.status(204).end();
   });
 
   r.post("/api/admin/users", authMiddleware, (req, res) => {
@@ -354,6 +426,12 @@ export function createRouter(db: Database.Database): Router {
 
   r.patch("/api/household", authMiddleware, (req, res) => {
     const { user } = req as AuthedRequest;
+    if (!user.isAdmin) {
+      res
+        .status(403)
+        .json({ error: "Only a household administrator can rename the household." });
+      return;
+    }
     const parsed = householdPatchSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.flatten() });
