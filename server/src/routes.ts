@@ -38,6 +38,10 @@ const envelopeCreateSchema = z.object({
   shared_with_household: z.boolean().optional(),
 });
 
+const envelopePatchSchema = z.object({
+  name: z.string().min(1).max(120),
+});
+
 const transactionSchema = z.object({
   amount_cents: z.number().int().positive().max(999_999_999_99),
   type: z.enum(["ebb", "flow"]),
@@ -46,7 +50,18 @@ const transactionSchema = z.object({
     .trim()
     .min(1, "Merchant or description is required")
     .max(500),
+  /** ISO 8601 or parseable date string; omit for “now” on create, omit on patch to leave unchanged */
+  created_at: z.string().optional(),
 });
+
+function normalizeOptionalCreatedAt(
+  raw: string | undefined
+): string | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  const t = Date.parse(raw);
+  if (Number.isNaN(t)) return undefined;
+  return new Date(t).toISOString();
+}
 
 const householdPatchSchema = z.object({
   name: z.string().min(1).max(80),
@@ -466,6 +481,63 @@ export function createRouter(db: Database.Database): Router {
     });
   });
 
+  r.patch("/api/envelopes/:id", authMiddleware, (req, res) => {
+    const { user } = req as AuthedRequest;
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const parsed = envelopePatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+    const info = db
+      .prepare(
+        `UPDATE envelopes SET name = ?
+         WHERE id = ? AND household_id = ? AND (is_shared = 1 OR user_id = ?)`
+      )
+      .run(parsed.data.name.trim(), id, user.householdId, user.id);
+    if (info.changes === 0) {
+      res.status(404).json({ error: "Envelope not found" });
+      return;
+    }
+    const row = db
+      .prepare(
+        `SELECT e.id, e.name, e.opening_balance_cents, e.created_at, e.is_shared,
+          COALESCE(SUM(t.amount_cents), 0) AS tx_sum
+        FROM envelopes e
+        LEFT JOIN transactions t ON t.envelope_id = e.id
+        WHERE e.id = ? AND e.household_id = ? AND (e.is_shared = 1 OR e.user_id = ?)
+        GROUP BY e.id`
+      )
+      .get(id, user.householdId, user.id) as
+      | {
+          id: number;
+          name: string;
+          opening_balance_cents: number;
+          created_at: string;
+          is_shared: number;
+          tx_sum: number;
+        }
+      | undefined;
+    if (!row) {
+      res.status(500).json({ error: "Could not load envelope" });
+      return;
+    }
+    res.json({
+      envelope: {
+        id: row.id,
+        name: row.name,
+        opening_balance_cents: row.opening_balance_cents,
+        balance_cents: row.opening_balance_cents + row.tx_sum,
+        created_at: row.created_at,
+        shared_with_household: row.is_shared === 1,
+      },
+    });
+  });
+
   r.delete("/api/envelopes/:id", authMiddleware, (req, res) => {
     const { user } = req as AuthedRequest;
     const id = Number(req.params.id);
@@ -509,13 +581,25 @@ export function createRouter(db: Database.Database): Router {
       return;
     }
     const { amount_cents, type, note } = parsed.data;
+    const createdAt = normalizeOptionalCreatedAt(parsed.data.created_at);
+    if (parsed.data.created_at !== undefined && parsed.data.created_at !== "" && !createdAt) {
+      res.status(400).json({ error: "Invalid created_at" });
+      return;
+    }
     const signed = type === "flow" ? amount_cents : -amount_cents;
-    const info = db
-      .prepare(
-        `INSERT INTO transactions (user_id, envelope_id, amount_cents, note)
-        VALUES (?, ?, ?, ?)`
-      )
-      .run(user.id, id, signed, note);
+    const info = createdAt
+      ? db
+          .prepare(
+            `INSERT INTO transactions (user_id, envelope_id, amount_cents, note, created_at)
+            VALUES (?, ?, ?, ?, ?)`
+          )
+          .run(user.id, id, signed, note, createdAt)
+      : db
+          .prepare(
+            `INSERT INTO transactions (user_id, envelope_id, amount_cents, note)
+            VALUES (?, ?, ?, ?)`
+          )
+          .run(user.id, id, signed, note);
     const txId = Number(info.lastInsertRowid);
     const sumRow = db
       .prepare(
@@ -525,12 +609,22 @@ export function createRouter(db: Database.Database): Router {
     const envRow = db
       .prepare("SELECT opening_balance_cents FROM envelopes WHERE id = ?")
       .get(id) as { opening_balance_cents: number };
+    const inserted = db
+      .prepare(
+        "SELECT id, amount_cents, note, created_at FROM transactions WHERE id = ?"
+      )
+      .get(txId) as {
+      id: number;
+      amount_cents: number;
+      note: string | null;
+      created_at: string;
+    };
     res.status(201).json({
       transaction: {
-        id: txId,
-        amount_cents: signed,
-        note,
-        created_at: new Date().toISOString(),
+        id: inserted.id,
+        amount_cents: inserted.amount_cents,
+        note: inserted.note,
+        created_at: inserted.created_at,
       },
       balance_cents: envRow.opening_balance_cents + sumRow.s,
     });
@@ -575,10 +669,21 @@ export function createRouter(db: Database.Database): Router {
         return;
       }
       const { amount_cents, type, note } = parsed.data;
+      const createdAt = normalizeOptionalCreatedAt(parsed.data.created_at);
+      if (parsed.data.created_at !== undefined && parsed.data.created_at !== "" && !createdAt) {
+        res.status(400).json({ error: "Invalid created_at" });
+        return;
+      }
       const signed = type === "flow" ? amount_cents : -amount_cents;
-      db.prepare(
-        `UPDATE transactions SET amount_cents = ?, note = ? WHERE id = ? AND envelope_id = ?`
-      ).run(signed, note, txId, envelopeId);
+      if (createdAt !== undefined) {
+        db.prepare(
+          `UPDATE transactions SET amount_cents = ?, note = ?, created_at = ? WHERE id = ? AND envelope_id = ?`
+        ).run(signed, note, createdAt, txId, envelopeId);
+      } else {
+        db.prepare(
+          `UPDATE transactions SET amount_cents = ?, note = ? WHERE id = ? AND envelope_id = ?`
+        ).run(signed, note, txId, envelopeId);
+      }
       const sumRow = db
         .prepare(
           `SELECT COALESCE(SUM(amount_cents), 0) AS s FROM transactions WHERE envelope_id = ?`

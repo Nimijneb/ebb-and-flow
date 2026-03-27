@@ -28,6 +28,14 @@ function formatMoney(cents: number): string {
   }).format(cents / 100);
 }
 
+/** `datetime-local` value in the browser's local zone */
+function toDatetimeLocalValue(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function EnvelopeDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -41,13 +49,20 @@ export function EnvelopeDetail() {
   const [type, setType] = useState<"ebb" | "flow">("ebb");
   /** Stored as `note` in the API; label in UI is merchant / description. */
   const [merchantOrDescription, setMerchantOrDescription] = useState("");
+  /** Empty = server uses current time when recording */
+  const [transactionDate, setTransactionDate] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editAmount, setEditAmount] = useState("");
   const [editType, setEditType] = useState<"ebb" | "flow">("ebb");
   const [editNote, setEditNote] = useState("");
+  const [editDate, setEditDate] = useState("");
   const [editBusy, setEditBusy] = useState(false);
+
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameName, setRenameName] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -82,16 +97,24 @@ export function EnvelopeDetail() {
     setSubmitting(true);
     setError(null);
     try {
+      const payload: Record<string, unknown> = {
+        amount_cents: cents,
+        type,
+        note: detail,
+      };
+      if (transactionDate.trim()) {
+        const d = new Date(transactionDate);
+        if (!Number.isNaN(d.getTime())) {
+          payload.created_at = d.toISOString();
+        }
+      }
       await api(`/api/envelopes/${id}/transactions`, {
         method: "POST",
-        body: JSON.stringify({
-          amount_cents: cents,
-          type,
-          note: detail,
-        }),
+        body: JSON.stringify(payload),
       });
       setAmount("");
       setMerchantOrDescription("");
+      setTransactionDate("");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add transaction");
@@ -105,12 +128,14 @@ export function EnvelopeDetail() {
     setEditAmount((Math.abs(t.amount_cents) / 100).toFixed(2));
     setEditType(t.amount_cents < 0 ? "ebb" : "flow");
     setEditNote((t.note ?? "").trim());
+    setEditDate(toDatetimeLocalValue(t.created_at));
   }
 
   function cancelEdit() {
     setEditingId(null);
     setEditAmount("");
     setEditNote("");
+    setEditDate("");
     setEditBusy(false);
   }
 
@@ -122,6 +147,11 @@ export function EnvelopeDetail() {
     const cents = Math.round(dollars * 100);
     const detail = editNote.trim();
     if (cents <= 0 || !detail) return;
+    const when = new Date(editDate);
+    if (!editDate.trim() || Number.isNaN(when.getTime())) {
+      setError("Choose a valid date and time for this transaction.");
+      return;
+    }
     setEditBusy(true);
     setError(null);
     try {
@@ -131,6 +161,7 @@ export function EnvelopeDetail() {
           amount_cents: cents,
           type: editType,
           note: detail,
+          created_at: when.toISOString(),
         }),
       });
       cancelEdit();
@@ -154,6 +185,36 @@ export function EnvelopeDetail() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete transaction");
+    }
+  }
+
+  function startRename() {
+    if (!envelope) return;
+    setRenameName(envelope.name);
+    setRenameOpen(true);
+  }
+
+  function cancelRename() {
+    setRenameOpen(false);
+    setRenameBusy(false);
+  }
+
+  async function saveRename(e: React.FormEvent) {
+    e.preventDefault();
+    if (!id || !renameName.trim()) return;
+    setRenameBusy(true);
+    setError(null);
+    try {
+      await api(`/api/envelopes/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: renameName.trim() }),
+      });
+      cancelRename();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not rename envelope");
+    } finally {
+      setRenameBusy(false);
     }
   }
 
@@ -231,16 +292,64 @@ export function EnvelopeDetail() {
       <main className="safe-x safe-b page-y mx-auto w-full max-w-3xl">
         <div className="mb-6 sm:mb-8">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-            <h1 className="font-display break-words text-2xl font-semibold leading-tight text-ink sm:text-3xl">
-              {envelope.name}
-            </h1>
-            <button
-              type="button"
-              onClick={removeEnvelope}
-              className="shrink-0 self-start text-sm font-medium text-red-700 hover:underline sm:pt-1 dark:text-red-400"
-            >
-              Delete envelope
-            </button>
+            <div className="min-w-0 flex-1">
+              {renameOpen ? (
+                <form
+                  onSubmit={saveRename}
+                  className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-3"
+                >
+                  <label className="min-w-0 flex-1 text-sm font-medium text-ink">
+                    Envelope name
+                    <input
+                      value={renameName}
+                      onChange={(e) => setRenameName(e.target.value)}
+                      maxLength={120}
+                      autoFocus
+                      className="input-field mt-1 font-display text-xl font-semibold text-ink sm:text-2xl"
+                    />
+                  </label>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <button
+                      type="submit"
+                      disabled={renameBusy || !renameName.trim()}
+                      className="btn-primary min-h-11"
+                    >
+                      {renameBusy ? "Saving…" : "Save name"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelRename}
+                      disabled={renameBusy}
+                      className="btn-secondary min-h-11"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <h1 className="font-display break-words text-2xl font-semibold leading-tight text-ink sm:text-3xl">
+                  {envelope.name}
+                </h1>
+              )}
+            </div>
+            {!renameOpen && (
+              <div className="flex shrink-0 flex-wrap items-center gap-4 self-start sm:pt-1">
+                <button
+                  type="button"
+                  onClick={startRename}
+                  className="text-sm font-medium text-accent hover:underline"
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={removeEnvelope}
+                  className="text-sm font-medium text-red-700 hover:underline dark:text-red-400"
+                >
+                  Delete envelope
+                </button>
+              </div>
+            )}
           </div>
           <p className="mt-2 text-sm text-muted">
             {envelope.shared_with_household ? (
@@ -268,7 +377,9 @@ export function EnvelopeDetail() {
             Add transaction
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Ebb removes money from this envelope; Flow adds money back.
+            Ebb removes money from this envelope; Flow adds money back. Leave
+            date empty to use now, or set a past date for something you forgot to
+            enter earlier.
           </p>
           <form onSubmit={addTransaction} className="mt-4 space-y-4">
             <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
@@ -316,6 +427,15 @@ export function EnvelopeDetail() {
                 required
                 maxLength={500}
                 autoComplete="off"
+                className="input-field mt-1"
+              />
+            </label>
+            <label className="block w-full max-w-md text-sm font-medium text-ink">
+              Date and time (optional)
+              <input
+                type="datetime-local"
+                value={transactionDate}
+                onChange={(e) => setTransactionDate(e.target.value)}
                 className="input-field mt-1"
               />
             </label>
@@ -402,12 +522,23 @@ export function EnvelopeDetail() {
                           className="input-field mt-1"
                         />
                       </label>
+                      <label className="block w-full max-w-md text-sm font-medium text-ink">
+                        Date and time
+                        <input
+                          type="datetime-local"
+                          value={editDate}
+                          onChange={(e) => setEditDate(e.target.value)}
+                          className="input-field mt-1"
+                          required
+                        />
+                      </label>
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="submit"
                           disabled={
                             editBusy ||
                             !editNote.trim() ||
+                            !editDate.trim() ||
                             Math.round(
                               parseFloat(editAmount.replace(/[^0-9.]/g, "") || "0") * 100
                             ) <= 0
