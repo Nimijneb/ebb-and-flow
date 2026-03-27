@@ -49,7 +49,7 @@ npm run start
 
 ## Docker
 
-Create a `.env` next to `docker-compose.yml`:
+Put a `.env` in the same directory as your compose file:
 
 ```env
 JWT_SECRET=your-long-random-secret
@@ -57,35 +57,77 @@ ADMIN_USERNAME=your-admin-username
 ADMIN_PASSWORD=your-initial-admin-password
 ```
 
-Then:
+SQLite data lives in the named volume `envelope_budget_data` at `DATABASE_PATH` (`/data/envelopes.db` in the examples below).
+
+### Example: build from this repository
+
+Use the bundled [`docker-compose.yml`](docker-compose.yml) after cloning:
+
+```yaml
+services:
+  envelope-budget:
+    build: .
+    image: envelope-budget:local
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      PORT: "4000"
+      DATABASE_PATH: /data/envelopes.db
+    volumes:
+      - envelope_budget_data:/data
+
+volumes:
+  envelope_budget_data:
+```
 
 ```bash
 docker compose up -d --build
 ```
 
-Open [http://localhost:4000](http://localhost:4000).
+### Example: pre-built image (GHCR)
 
-Data is stored in the `envelope_budget_data` volume at `DATABASE_PATH` (`/data/envelopes.db` in the compose file).
+This repo publishes to **GitHub Container Registry** via [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) (on pushes to `main` and tags like `v1.0.0`). Set the package to **Public** under **Packages** if you want unauthenticated `docker pull`.
 
-### Pre-built image (no clone)
+Replace `nimijneb` with your GitHub user or org if you use a fork. Same layout as [`docker-compose.image.yml`](docker-compose.image.yml):
 
-This repo can publish a **free** image to **GitHub Container Registry** (`ghcr.io`) using the workflow in `.github/workflows/docker-publish.yml`. It runs on every push to `main` (and on version tags like `v1.0.0`).
+```yaml
+services:
+  envelope-budget:
+    image: ghcr.io/nimijneb/envelope-budget:latest
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      PORT: "4000"
+      DATABASE_PATH: /data/envelopes.db
+    volumes:
+      - envelope_budget_data:/data
 
-1. Push `main` on GitHub and wait for the **Publish Docker image** action to finish (Actions tab).
-2. In **Packages** (your profile or org), open the `envelope-budget` package and set **visibility to Public** if you want anyone to `docker pull` without logging in.
-3. On a server, only a `.env` and compose file are needed:
+volumes:
+  envelope_budget_data:
+```
 
 ```bash
-curl -fsSL -o docker-compose.image.yml https://raw.githubusercontent.com/Nimijneb/envelope-budget/main/docker-compose.image.yml
-# Edit image: line if you use a fork (ghcr.io/<your-username>/envelope-budget:latest)
-echo 'JWT_SECRET=...' > .env
-echo 'ADMIN_USERNAME=...' >> .env
-echo 'ADMIN_PASSWORD=...' >> .env
 docker compose -f docker-compose.image.yml pull
 docker compose -f docker-compose.image.yml up -d
 ```
 
-Open [http://localhost:4000](http://localhost:4000).
+Or download the file from GitHub and run the same commands:
+
+```bash
+curl -fsSL -o docker-compose.image.yml https://raw.githubusercontent.com/Nimijneb/envelope-budget/main/docker-compose.image.yml
+docker compose -f docker-compose.image.yml pull
+docker compose -f docker-compose.image.yml up -d
+```
+
+Open the app at [http://localhost:4000](http://localhost:4000) (change the host port in `ports:` if `4000` is taken).
 
 ## Environment
 
