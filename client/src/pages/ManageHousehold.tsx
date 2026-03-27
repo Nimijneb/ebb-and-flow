@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { PronghornLogo } from "../components/PronghornLogo";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { ThemeToggle } from "../theme";
@@ -111,9 +112,15 @@ export function ManageHousehold() {
             >
               ← Dashboard
             </Link>
-            <p className="font-display text-lg font-semibold text-ink sm:text-xl">
-              Manage household
-            </p>
+            <div className="flex items-center gap-2">
+              <PronghornLogo
+                decorative
+                className="h-8 w-auto shrink-0 text-ink"
+              />
+              <p className="font-display text-lg font-semibold text-ink sm:text-xl">
+                Manage household
+              </p>
+            </div>
             <p className="truncate text-sm text-muted">{user?.username}</p>
           </div>
           <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">

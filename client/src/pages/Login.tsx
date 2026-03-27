@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth";
+import { PronghornLogo } from "../components/PronghornLogo";
 import { ThemeToggle } from "../theme";
 
 export function Login() {
@@ -49,11 +50,14 @@ export function Login() {
           <ThemeToggle />
         </div>
         <div className="mb-8 text-center sm:mb-10">
-          <div className="neon-login-icon mx-auto mb-4 flex h-14 w-14 min-h-[56px] min-w-[56px] items-center justify-center rounded-2xl bg-accent text-2xl shadow-lg shadow-teal-900/10">
-            ✉️
+          <div className="neon-login-icon mx-auto mb-4 inline-flex h-14 max-w-[min(100%,13rem)] items-center justify-center rounded-2xl bg-accent px-5 shadow-lg shadow-teal-900/10">
+            <PronghornLogo
+              decorative
+              className="h-9 w-auto text-white dark:text-[#06060c]"
+            />
           </div>
           <h1 className="font-display text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-            Envelope Budget
+            Pronghorn
           </h1>
           <p className="mt-2 px-1 text-sm text-muted sm:text-base">
             Sign in with the username your administrator created for you.

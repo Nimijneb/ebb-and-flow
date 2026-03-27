@@ -1,4 +1,4 @@
-# Envelope Budget
+# Pronghorn
 
 A small, self-hosted envelope budgeting app with **households** (shared budgets) and multiple envelopes per household. Each envelope has a **starting balance** when created; you then record **debits** (money out) and **credits** (money in). Current balance is: starting balance plus the sum of all transactions.
 

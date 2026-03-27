@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { PronghornLogo } from "../components/PronghornLogo";
 import { ThemeToggle } from "../theme";
 
 export type EnvelopeSummary = {
@@ -47,10 +48,10 @@ export function Dashboard() {
   return (
     <div className="min-h-[100dvh] bg-paper">
       <header className="chromatic-header sticky top-0 z-10 border-b border-border bg-card/90 backdrop-blur-md">
-        <div className="safe-x safe-t mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 pb-3 sm:pb-4">
-          <div className="min-w-0 flex-1">
+        <div className="safe-x safe-t mx-auto grid max-w-3xl grid-cols-[1fr_auto_1fr] items-center gap-2 pb-3 sm:gap-3 sm:pb-4">
+          <div className="min-w-0 justify-self-start">
             <p className="font-display text-lg font-semibold text-ink sm:text-xl">
-              Envelope Budget
+              Pronghorn
             </p>
             <p className="truncate text-sm text-muted">{user?.username}</p>
             {user?.household && (
@@ -65,7 +66,13 @@ export function Dashboard() {
               </p>
             )}
           </div>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
+          <div className="flex justify-center justify-self-center px-1">
+            <PronghornLogo
+              decorative
+              className="h-9 w-auto max-w-[min(100vw-12rem,11rem)] shrink-0 text-ink sm:h-10"
+            />
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center justify-end justify-self-end gap-1 sm:gap-2">
             <Link
               to="/manage"
               className="btn-ghost inline-flex shrink-0 items-center justify-center rounded-xl px-3 text-sm sm:text-base"
