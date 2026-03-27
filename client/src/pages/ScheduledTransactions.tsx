@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth";
 import { AppHeader } from "../components/AppHeader";
+import { HelpPopover } from "../components/HelpPopover";
 import { HeaderUserLeft } from "../components/HeaderUserLeft";
 import type { EnvelopeSummary } from "./Dashboard";
 
@@ -28,6 +29,7 @@ function formatMoney(cents: number): string {
 export function ScheduledTransactions() {
   const { user } = useAuth();
   const [envelopes, setEnvelopes] = useState<EnvelopeSummary[]>([]);
+  const editableEnvelopes = envelopes.filter((e) => e.can_edit);
   const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -194,15 +196,22 @@ export function ScheduledTransactions() {
         >
           ← Dashboard
         </Link>
-        <h1 className="font-display mb-2 text-2xl font-semibold text-ink sm:text-3xl">
-          Scheduled transactions
+        <h1 className="font-display mb-6 text-2xl font-semibold text-ink sm:mb-8 sm:text-3xl">
+          <HelpPopover
+            content={
+              <span>
+                Each month on the day you choose (or the last day of the month if
+                that day does not exist), the app records one Ebb or Flow. You can
+                target any envelope you can see—shared household envelopes or your
+                private ones. Times use the server&apos;s local time zone.
+              </span>
+            }
+          >
+            <span className="font-display text-2xl font-semibold sm:text-3xl">
+              Scheduled transactions
+            </span>
+          </HelpPopover>
         </h1>
-        <p className="mb-6 max-w-2xl text-sm text-muted sm:mb-8">
-          Each month on the day you choose (or the last day of the month if that
-          day does not exist), the app records one Ebb or Flow. You can target any
-          envelope you can see—shared household envelopes or your private ones.
-          Times use the server&apos;s local time zone.
-        </p>
 
         {error && (
           <div
@@ -231,7 +240,7 @@ export function ScheduledTransactions() {
                 required
               >
                 <option value="">Select…</option>
-                {envelopes.map((env) => (
+                {editableEnvelopes.map((env) => (
                   <option key={env.id} value={env.id}>
                     {env.name}
                     {env.shared_with_household ? " (shared)" : " (private)"}
@@ -264,7 +273,7 @@ export function ScheduledTransactions() {
                     onChange={() => setType("ebb")}
                     className="h-5 w-5 accent-warm"
                   />
-                  <span>Ebb</span>
+                  <span className="text-warm">Ebb</span>
                 </label>
                 <label className="flex min-h-[44px] cursor-pointer items-center gap-2.5 text-base touch-manipulation">
                   <input
@@ -272,9 +281,9 @@ export function ScheduledTransactions() {
                     name="schedtype"
                     checked={type === "flow"}
                     onChange={() => setType("flow")}
-                    className="h-5 w-5 accent-accent"
+                    className="h-5 w-5 accent-flow"
                   />
-                  <span>Flow</span>
+                  <span className="text-flow">Flow</span>
                 </label>
               </fieldset>
               <label className="block w-full min-w-0 sm:max-w-xs sm:flex-1">
@@ -348,14 +357,20 @@ export function ScheduledTransactions() {
                             }
                             required
                           >
-                            {envelopes.map((env) => (
-                              <option key={env.id} value={env.id}>
-                                {env.name}
-                                {env.shared_with_household
-                                  ? " (shared)"
-                                  : " (private)"}
-                              </option>
-                            ))}
+                            {envelopes
+                              .filter(
+                                (e) =>
+                                  e.can_edit || e.id === editEnvelopeId
+                              )
+                              .map((env) => (
+                                <option key={env.id} value={env.id}>
+                                  {env.name}
+                                  {env.shared_with_household
+                                    ? " (shared)"
+                                    : " (private)"}
+                                  {!env.can_edit ? " (view only)" : ""}
+                                </option>
+                              ))}
                           </select>
                         </label>
                         <label className="block text-sm font-medium text-ink">
@@ -385,7 +400,7 @@ export function ScheduledTransactions() {
                             onChange={() => setEditType("ebb")}
                             className="h-5 w-5 accent-warm"
                           />
-                          Ebb
+                          <span className="text-warm">Ebb</span>
                         </label>
                         <label className="flex cursor-pointer items-center gap-2 text-base">
                           <input
@@ -393,9 +408,9 @@ export function ScheduledTransactions() {
                             name={`edittype-${s.id}`}
                             checked={editType === "flow"}
                             onChange={() => setEditType("flow")}
-                            className="h-5 w-5 accent-accent"
+                            className="h-5 w-5 accent-flow"
                           />
-                          Flow
+                          <span className="text-flow">Flow</span>
                         </label>
                       </fieldset>
                       <label className="block text-sm font-medium text-ink">
@@ -449,8 +464,21 @@ export function ScheduledTransactions() {
                       <div className="min-w-0 flex-1">
                         <p className="font-medium text-ink">
                           {s.envelope_name} · Day {s.day_of_month} ·{" "}
-                          {s.type === "ebb" ? "Ebb" : "Flow"} ·{" "}
-                          {formatMoney(s.amount_cents)}
+                          <span
+                            className={
+                              s.type === "ebb" ? "text-warm" : "text-flow"
+                            }
+                          >
+                            {s.type === "ebb" ? "Ebb" : "Flow"}
+                          </span>
+                          {" · "}
+                          <span
+                            className={
+                              s.type === "ebb" ? "text-warm" : "text-flow"
+                            }
+                          >
+                            {formatMoney(s.amount_cents)}
+                          </span>
                         </p>
                         <p className="mt-1 text-sm text-muted">{s.note}</p>
                         <p className="mt-1 text-xs text-muted">

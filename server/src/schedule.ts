@@ -32,7 +32,16 @@ export function runDueSchedules(db: Database.Database): void {
        JOIN users u ON u.id = s.user_id
        WHERE s.enabled = 1
          AND e.household_id = u.household_id
-         AND (e.is_shared = 1 OR e.user_id = s.user_id)`
+         AND (
+           (e.is_shared = 1 AND (u.is_admin = 1 OR e.user_id = s.user_id))
+           OR (
+             e.is_shared = 0
+             AND (
+               (u.is_admin = 1 AND COALESCE(e.owner_user_id, e.user_id) = s.user_id)
+               OR (u.is_admin = 0 AND e.user_id = s.user_id)
+             )
+           )
+         )`
     )
     .all() as ScheduleRow[];
 

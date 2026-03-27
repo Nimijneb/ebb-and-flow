@@ -136,11 +136,11 @@ export function AppHeader({ left }: AppHeaderProps) {
                   Schedules
                 </NavLink>
                 <NavLink
-                  to="/manage"
+                  to="/settings"
                   className={navLinkClass}
                   onClick={() => setMenuOpen(false)}
                 >
-                  Manage
+                  Settings
                 </NavLink>
                 <div className="mx-2 my-2 border-t border-border" />
                 <div className="flex items-center justify-between gap-3 px-3 py-2">

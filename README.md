@@ -2,147 +2,51 @@
 
 > **Disclaimer:** this project is 100% vibe coded. There may be security issues that I do not know to look for.
 
-A small, self-hosted envelope budgeting app with **households** (shared budgets) and multiple envelopes per household. Each envelope has a **starting balance** when created; you then record **Ebb** (money out) and **Flow** (money in). Current balance is: starting balance plus the sum of all transactions.
+Self-hosted envelope budgeting: **households**, **envelopes**, **Ebb** (money out) and **Flow** (money in), plus optional **scheduled** Ebb/Flow. One container serves the API and the web UI.
 
-## Features
+## Run with Docker (recommended)
 
-- **Locked sign-up**: there is no public registration. Set **`ADMIN_USERNAME`** and **`ADMIN_PASSWORD`** in the environment; on first start the server creates (or promotes) that admin. The admin signs in and uses **Add a family member** on the dashboard to create accounts for everyone else. Accounts use **usernames** only (no email).
-- Optional **`ALLOW_OPEN_REGISTRATION=true`** (development only) re-enables `POST /api/auth/register`.
-- Sign in (JWT, bcrypt passwords)
-- **Households**: each account belongs to one household; family members share envelopes.
-- Create envelopes with a starting balance (in dollars; stored as cents)
-- List envelopes with running balance (shared with the household)
-- Per-envelope transaction log (Ebb or Flow, optional note; shows who recorded each entry)
-- Delete an envelope (and its transactions)
-- **Scheduled transactions**: each user can add monthly Ebb or Flow on a chosen day of the month to any envelope they can access (shared or private); the server records them automatically in its local time zone
-- Single container: API + static web UI
+You do **not** need Node.js or a local build. Pull the published image and run it with Compose.
+
+1. Put a `.env` in the same folder as the compose file:
+
+```env
+JWT_SECRET=your-long-random-secret-at-least-32-characters
+ADMIN_USERNAME=your-admin-username
+ADMIN_PASSWORD=your-initial-admin-password
+```
+
+2. Use the repo’s [`docker-compose.image.yml`](docker-compose.image.yml) (or copy it from GitHub) and start:
+
+```bash
+docker compose -f docker-compose.image.yml pull
+docker compose -f docker-compose.image.yml up -d
+```
+
+The image is built from `main` and published to **GitHub Container Registry** as:
+
+`ghcr.io/nimijneb/envelope-budget:latest`
+
+(Use your fork’s owner in lowercase if you forked the repo.) Treat it like any other public image: same `docker pull` / `docker compose` workflow as Docker Hub.
+
+3. Open **http://localhost:4000** (or the host/port you mapped).
+
+There is **no public registration**. The first account is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` on startup. That admin adds everyone else under **Settings**.
+
+### Optional environment
+
+| Variable | Notes |
+|----------|--------|
+| `JWT_SECRET` | Required; use a long random string |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Required for the first admin (password ≥ 8 characters) |
+| `PORT` | Default `4000` |
+| `DATABASE_PATH` | SQLite path (default in container: `/data/envelopes.db` with the sample compose) |
+| `CORS_ORIGIN` | Only if the browser loads the UI from a different origin than the API |
+| `ALLOW_OPEN_REGISTRATION` | `true` = allow open signup (**dev only**; leave unset in production) |
 
 ## Development
 
-Requires Node.js 20+.
-
-```bash
-npm install
-npm run dev
-```
-
-- API: [http://127.0.0.1:4000](http://127.0.0.1:4000) (set `JWT_SECRET` in `.env` for stable tokens)
-- Vite dev server: [http://127.0.0.1:5173](http://127.0.0.1:5173) (proxies `/api` to the API)
-
-Create a `.env` in the repo root or under `server/`:
-
-```env
-JWT_SECRET=your-long-random-secret-at-least-32-chars
-ADMIN_USERNAME=your-admin-username
-ADMIN_PASSWORD=your-initial-admin-password
-# Optional: comma-separated browser origins if the UI is not same-origin as the API (default: same-origin only)
-# CORS_ORIGIN=https://budget.example.com
-```
-
-`ADMIN_EMAIL` is still accepted as a fallback for the admin username if `ADMIN_USERNAME` is unset.
-
-Without admin env vars and an empty database, no one can sign in until you set them and restart (unless you use `ALLOW_OPEN_REGISTRATION=true` for dev).
-
-Production build (writes the SPA into `server/public` and compiles the server):
-
-```bash
-npm run build
-npm run start
-```
-
-## Docker
-
-Put a `.env` in the same directory as your compose file:
-
-```env
-JWT_SECRET=your-long-random-secret
-ADMIN_USERNAME=your-admin-username
-ADMIN_PASSWORD=your-initial-admin-password
-```
-
-SQLite data lives in the named volume `envelope_budget_data` at `DATABASE_PATH` (`/data/envelopes.db` in the examples below).
-
-### Example: build from this repository
-
-Use the bundled [`docker-compose.yml`](docker-compose.yml) after cloning:
-
-```yaml
-services:
-  envelope-budget:
-    build: .
-    image: envelope-budget:local
-    restart: unless-stopped
-    ports:
-      - "4000:4000"
-    environment:
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
-      PORT: "4000"
-      DATABASE_PATH: /data/envelopes.db
-    volumes:
-      - envelope_budget_data:/data
-
-volumes:
-  envelope_budget_data:
-```
-
-```bash
-docker compose up -d --build
-```
-
-### Example: pre-built image (GHCR)
-
-This repo publishes to **GitHub Container Registry** via [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) (on pushes to `main` and tags like `v1.0.0`). Set the package to **Public** under **Packages** if you want unauthenticated `docker pull`.
-
-Replace `nimijneb` with your GitHub user or org if you use a fork. Same layout as [`docker-compose.image.yml`](docker-compose.image.yml):
-
-```yaml
-services:
-  envelope-budget:
-    image: ghcr.io/nimijneb/envelope-budget:latest
-    restart: unless-stopped
-    ports:
-      - "4000:4000"
-    environment:
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
-      PORT: "4000"
-      DATABASE_PATH: /data/envelopes.db
-    volumes:
-      - envelope_budget_data:/data
-
-volumes:
-  envelope_budget_data:
-```
-
-```bash
-docker compose -f docker-compose.image.yml pull
-docker compose -f docker-compose.image.yml up -d
-```
-
-Or download the file from GitHub and run the same commands:
-
-```bash
-curl -fsSL -o docker-compose.image.yml https://raw.githubusercontent.com/Nimijneb/envelope-budget/main/docker-compose.image.yml
-docker compose -f docker-compose.image.yml pull
-docker compose -f docker-compose.image.yml up -d
-```
-
-Open the app at [http://localhost:4000](http://localhost:4000) (change the host port in `ports:` if `4000` is taken).
-
-## Environment
-
-| Variable                   | Description |
-|----------------------------|-------------|
-| `JWT_SECRET`               | Secret for signing tokens (use a strong value) |
-| `ADMIN_USERNAME`         | Username for the household admin (seeded on startup). `ADMIN_EMAIL` is used if this is unset (legacy). |
-| `ADMIN_PASSWORD`           | Password for that admin when the account is first created (min 8 chars) |
-| `ALLOW_OPEN_REGISTRATION`  | Set to `true` to allow `POST /api/auth/register` (dev only; default off) |
-| `DATABASE_PATH`            | SQLite file path (default: `./data/envelopes.db` from server cwd) |
-| `PORT`                     | HTTP port (default `4000`) |
-| `CORS_ORIGIN`              | Optional browser origin for CORS |
+If you are working on the code: clone the repo, `npm install`, copy `.env` at the repo root, then `npm run dev` (Vite + API). Production build: `npm run build` then `npm run start` from the repo root.
 
 ## License
 

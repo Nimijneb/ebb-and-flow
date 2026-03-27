@@ -61,8 +61,11 @@ function migrate(db: Database.Database): void {
 
   migrateHouseholds(db);
   migrateEnvelopeShared(db);
+  migrateEnvelopeOwner(db);
   migrateScheduledTransactions(db);
   migrateRefreshTokens(db);
+  migrateDashboardEnvelopeOrder(db);
+  migrateEnvelopeAssignedUser(db);
 }
 
 /** Shared = visible to whole household; private = only creator (same household). */
@@ -72,6 +75,19 @@ function migrateEnvelopeShared(db: Database.Database): void {
     db.exec(
       "ALTER TABLE envelopes ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 1"
     );
+  }
+}
+
+/** Who may edit private envelopes (admins); defaults to creator. */
+function migrateEnvelopeOwner(db: Database.Database): void {
+  const envCols = tableInfo(db, "envelopes");
+  if (!envCols.some((c) => c.name === "owner_user_id")) {
+    db.exec(
+      "ALTER TABLE envelopes ADD COLUMN owner_user_id INTEGER REFERENCES users(id)"
+    );
+    db.prepare(
+      "UPDATE envelopes SET owner_user_id = user_id WHERE owner_user_id IS NULL"
+    ).run();
   }
 }
 
@@ -204,5 +220,28 @@ function migrateEmailToUsername(db: Database.Database): void {
   const hasUsername = cols.some((c) => c.name === "username");
   if (hasEmail && !hasUsername) {
     db.exec("ALTER TABLE users RENAME COLUMN email TO username");
+  }
+}
+
+/** JSON array of envelope ids — dashboard list order for this user. */
+function migrateDashboardEnvelopeOrder(db: Database.Database): void {
+  const userCols = tableInfo(db, "users");
+  if (!userCols.some((c) => c.name === "dashboard_envelope_order_json")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN dashboard_envelope_order_json TEXT"
+    );
+  }
+}
+
+/** Shared envelopes: who may edit (non-admins). Defaults to creator. */
+function migrateEnvelopeAssignedUser(db: Database.Database): void {
+  const envCols = tableInfo(db, "envelopes");
+  if (!envCols.some((c) => c.name === "assigned_user_id")) {
+    db.exec(
+      "ALTER TABLE envelopes ADD COLUMN assigned_user_id INTEGER REFERENCES users(id)"
+    );
+    db.prepare(
+      "UPDATE envelopes SET assigned_user_id = user_id WHERE is_shared = 1 AND assigned_user_id IS NULL"
+    ).run();
   }
 }

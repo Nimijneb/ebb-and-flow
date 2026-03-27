@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from "./auth";
 import { Dashboard } from "./pages/Dashboard";
 import { EnvelopeDetail } from "./pages/EnvelopeDetail";
 import { Login } from "./pages/Login";
-import { ManageHousehold } from "./pages/ManageHousehold";
+import { Settings } from "./pages/Settings";
 import { ScheduledTransactions } from "./pages/ScheduledTransactions";
 
 function Protected({ children }: { children: ReactNode }) {
@@ -42,13 +42,14 @@ export function App() {
           }
         />
         <Route
-          path="/manage"
+          path="/settings"
           element={
             <Protected>
-              <ManageHousehold />
+              <Settings />
             </Protected>
           }
         />
+        <Route path="/manage" element={<Navigate to="/settings" replace />} />
         <Route
           path="/schedules"
           element={
