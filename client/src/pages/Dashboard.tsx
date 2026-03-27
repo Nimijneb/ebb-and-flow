@@ -104,10 +104,10 @@ export function Dashboard() {
   );
 
   return (
-    <div className="min-h-[100dvh] bg-paper">
+    <div className="min-h-[100dvh] w-full min-w-0 overflow-x-hidden bg-paper">
       <AppHeader left={<HeaderUserLeft user={user} />} />
 
-      <main className="safe-x safe-b page-y mx-auto w-full max-w-3xl">
+      <main className="safe-x safe-b page-y mx-auto w-full min-w-0 max-w-3xl">
         {error && (
           <div
             className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 shadow-sm dark:border-red-400/60 dark:bg-red-950/70 dark:text-red-50 dark:shadow-[0_0_32px_rgba(255,60,120,0.45),0_0_60px_rgba(239,68,68,0.2)]"

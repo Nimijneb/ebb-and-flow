@@ -86,6 +86,8 @@ html.dark body {
 #root {
   min-height: 100dvh;
   min-height: -webkit-fill-available;
+  width: 100%;
+  min-width: 0;
 }
 
 button,

@@ -88,9 +88,9 @@ export function AppHeader({ left }: AppHeaderProps) {
 
   return (
     <header className="chromatic-header sticky top-0 z-20 overflow-visible border-b border-border bg-card/90 backdrop-blur-md">
-      <div className="safe-x safe-t mx-auto max-w-3xl pb-2 sm:pb-4">
-        <div className="relative flex h-[4.25rem] items-center justify-between sm:h-[4.5rem]">
-          <div className="pointer-events-none relative z-20 flex h-full min-w-0 max-w-[min(13rem,46%)] flex-col justify-center overflow-hidden pr-1 sm:max-w-[min(18rem,44%)] sm:pr-2">
+      <div className="safe-x safe-t mx-auto w-full min-w-0 max-w-3xl pb-2 sm:pb-4">
+        <div className="relative flex h-[4.25rem] w-full min-w-0 items-center justify-between sm:h-[4.5rem]">
+          <div className="pointer-events-none relative z-20 flex h-full min-w-0 max-w-[13rem] flex-col justify-center overflow-hidden pr-1 sm:max-w-[18rem] sm:pr-2">
             <div className="pointer-events-auto min-w-0 max-w-full">{left}</div>
           </div>
           <Link

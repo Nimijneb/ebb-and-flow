@@ -99,10 +99,10 @@ export function Settings() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-paper">
+    <div className="min-h-[100dvh] w-full min-w-0 overflow-x-hidden bg-paper">
       <AppHeader left={<HeaderUserLeft user={user} />} />
 
-      <main className="safe-x safe-b page-y mx-auto w-full max-w-3xl">
+      <main className="safe-x safe-b page-y mx-auto w-full min-w-0 max-w-3xl">
         <Link
           to="/"
           className="mb-4 inline-block text-sm font-medium text-accent hover:underline"
@@ -172,13 +172,6 @@ export function Settings() {
                       className="input-field mt-1"
                     />
                   </label>
-                  <button
-                    type="submit"
-                    disabled={creating || !name.trim()}
-                    className="btn-primary w-full touch-manipulation sm:w-auto"
-                  >
-                    {creating ? "Adding…" : "Add"}
-                  </button>
                 </div>
                 <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-paper/60 p-3 dark:bg-black/20">
                   <input
@@ -254,6 +247,15 @@ export function Settings() {
                     </select>
                   </label>
                 ) : null}
+                <div className="pt-1 sm:flex sm:justify-end">
+                  <button
+                    type="submit"
+                    disabled={creating || !name.trim()}
+                    className="btn-primary w-full touch-manipulation sm:w-auto"
+                  >
+                    {creating ? "Adding…" : "Add"}
+                  </button>
+                </div>
               </form>
             </section>
 
