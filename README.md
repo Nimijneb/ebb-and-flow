@@ -4,8 +4,6 @@
 
 A small, self-hosted envelope budgeting app with **households** (shared budgets) and multiple envelopes per household. Each envelope has a **starting balance** when created; you then record **Ebb** (money out) and **Flow** (money in). Current balance is: starting balance plus the sum of all transactions.
 
-Inspired by [Goodbudget](https://goodbudget.com/) and [Envelopes](https://envlps.com/), with fewer features on purpose.
-
 ## Features
 
 - **Locked sign-up**: there is no public registration. Set **`ADMIN_USERNAME`** and **`ADMIN_PASSWORD`** in the environment; on first start the server creates (or promotes) that admin. The admin signs in and uses **Add a family member** on the dashboard to create accounts for everyone else. Accounts use **usernames** only (no email).
