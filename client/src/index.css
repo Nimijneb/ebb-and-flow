@@ -15,6 +15,7 @@
   --color-warm-dim: #ffedd5;
   /** Positive Flow / money in — distinct from teal accent links */
   --color-flow: #047857;
+  --color-private: #7c3aed;
   --color-card: #ffffff;
   --color-border: #e7e5e4;
 }
@@ -38,6 +39,7 @@ html.dark {
   --neon-purple: #c84fff;
   --neon-mint: #00ffb7;
   --color-flow: #4ade80;
+  --color-private: #c84fff;
 }
 
 html {
@@ -123,6 +125,12 @@ input[type="checkbox"] {
   text-shadow:
     0 0 12px rgba(255, 46, 196, 0.75),
     0 0 28px rgba(255, 100, 200, 0.35);
+}
+
+.dark .text-private {
+  text-shadow:
+    0 0 12px rgba(200, 79, 255, 0.8),
+    0 0 28px rgba(200, 79, 255, 0.4);
 }
 
 .dark .chromatic-header {

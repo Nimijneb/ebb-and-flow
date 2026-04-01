@@ -558,7 +558,7 @@ export function EnvelopeDetail() {
                         {envelope.assigned_username}
                       </>
                     ) : (
-                      <span className="font-medium text-warm">Private</span>
+                      <span className="font-medium text-private">Private</span>
                     )}
                   </span>
                 </HelpPopover>

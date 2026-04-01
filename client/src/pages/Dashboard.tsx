@@ -243,7 +243,7 @@ export function Dashboard() {
                         {env.name}
                         <span
                           className={`ml-2 align-middle text-xs font-medium ${
-                            env.shared_with_household ? "text-accent" : "text-warm"
+                            env.shared_with_household ? "text-accent" : "text-private"
                           }`}
                         >
                           {env.shared_with_household ? "Shared" : "Private"}

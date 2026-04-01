@@ -50,7 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     const t = getToken();
-    if (!t) {
+    const rt = getRefreshToken();
+    if (!t && !rt) {
       setUser(null);
       setLoading(false);
       return;
