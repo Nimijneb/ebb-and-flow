@@ -9,6 +9,9 @@ type ScheduleRow = {
   amount_cents: number;
   note: string;
   last_run_month: string | null;
+  end_date: string | null;
+  max_occurrences: number | null;
+  occurrence_count: number;
 };
 
 let scheduleRunnerBusy = false;
@@ -29,9 +32,12 @@ export function runDueSchedules(db: Database.Database): void {
     const lastDayOfMonth = new Date(y, m + 1, 0).getDate();
     const ym = `${y}-${String(m + 1).padStart(2, "0")}`;
 
+    const todayStr = `${y}-${String(m + 1).padStart(2, "0")}-${String(todayDom).padStart(2, "0")}`;
+
     const rows = db
       .prepare(
-        `SELECT s.id, s.user_id, s.envelope_id, s.day_of_month, s.type, s.amount_cents, s.note, s.last_run_month
+        `SELECT s.id, s.user_id, s.envelope_id, s.day_of_month, s.type, s.amount_cents, s.note,
+                s.last_run_month, s.end_date, s.max_occurrences, s.occurrence_count
          FROM scheduled_transactions s
          JOIN envelopes e ON e.id = s.envelope_id
          JOIN users u ON u.id = s.user_id
@@ -54,6 +60,8 @@ export function runDueSchedules(db: Database.Database): void {
       const targetDay = Math.min(row.day_of_month, lastDayOfMonth);
       if (todayDom !== targetDay) continue;
       if (row.last_run_month === ym) continue;
+      if (row.end_date !== null && todayStr > row.end_date) continue;
+      if (row.max_occurrences !== null && row.occurrence_count >= row.max_occurrences) continue;
 
       const signed = row.type === "flow" ? row.amount_cents : -row.amount_cents;
 
@@ -61,7 +69,7 @@ export function runDueSchedules(db: Database.Database): void {
         const updated = db
           .prepare(
             `UPDATE scheduled_transactions
-             SET last_run_month = ?
+             SET last_run_month = ?, occurrence_count = occurrence_count + 1
              WHERE id = ? AND (last_run_month IS NULL OR last_run_month != ?)`
           )
           .run(ym, row.id, ym);

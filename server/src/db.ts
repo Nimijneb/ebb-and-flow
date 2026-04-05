@@ -70,6 +70,7 @@ function migrate(db: Database.Database): void {
   migrateEnvelopeShared(db);
   migrateEnvelopeOwner(db);
   migrateScheduledTransactions(db);
+  migrateScheduledTransactionLimits(db);
   migrateRefreshTokens(db);
   migrateDashboardEnvelopeOrder(db);
   migrateEnvelopeAssignedUser(db);
@@ -122,6 +123,27 @@ function migrateScheduledTransactions(db: Database.Database): void {
       CREATE INDEX idx_sched_user ON scheduled_transactions(user_id);
       CREATE INDEX idx_sched_envelope ON scheduled_transactions(envelope_id);
     `);
+  }
+}
+
+/** End date / max-occurrence limits for scheduled transactions. */
+function migrateScheduledTransactionLimits(db: Database.Database): void {
+  const cols = tableInfo(db, "scheduled_transactions");
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has("end_date")) {
+    db.exec(
+      "ALTER TABLE scheduled_transactions ADD COLUMN end_date TEXT"
+    );
+  }
+  if (!names.has("max_occurrences")) {
+    db.exec(
+      "ALTER TABLE scheduled_transactions ADD COLUMN max_occurrences INTEGER"
+    );
+  }
+  if (!names.has("occurrence_count")) {
+    db.exec(
+      "ALTER TABLE scheduled_transactions ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 0"
+    );
   }
 }
 

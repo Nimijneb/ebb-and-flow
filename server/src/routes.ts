@@ -119,6 +119,8 @@ const scheduleCreateSchema = z.object({
   amount_cents: z.number().int().positive().max(999_999_999_99),
   note: z.string().trim().min(1).max(500).optional(),
   enabled: z.boolean().optional(),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  max_occurrences: z.number().int().positive().max(9999).nullable().optional(),
 });
 
 const schedulePatchSchema = z.object({
@@ -128,6 +130,8 @@ const schedulePatchSchema = z.object({
   amount_cents: z.number().int().positive().max(999_999_999_99).optional(),
   note: z.string().trim().min(1).max(500).optional(),
   enabled: z.boolean().optional(),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  max_occurrences: z.number().int().positive().max(9999).nullable().optional(),
 });
 
 const refreshBodySchema = z.object({
@@ -1561,7 +1565,8 @@ export function createRouter(db: Database.Database): Router {
     const rows = db
       .prepare(
         `SELECT s.id, s.envelope_id, e.name AS envelope_name, s.day_of_month, s.type,
-          s.amount_cents, s.note, s.enabled, s.last_run_month
+          s.amount_cents, s.note, s.enabled, s.last_run_month,
+          s.end_date, s.max_occurrences, s.occurrence_count
          FROM scheduled_transactions s
          JOIN envelopes e ON e.id = s.envelope_id
          WHERE s.user_id = ?
@@ -1577,6 +1582,9 @@ export function createRouter(db: Database.Database): Router {
         note: string;
         enabled: number;
         last_run_month: string | null;
+        end_date: string | null;
+        max_occurrences: number | null;
+        occurrence_count: number;
       }>;
     res.json({
       schedules: rows.map((r) => ({
@@ -1589,6 +1597,9 @@ export function createRouter(db: Database.Database): Router {
         note: r.note,
         enabled: r.enabled === 1,
         last_run_month: r.last_run_month,
+        end_date: r.end_date,
+        max_occurrences: r.max_occurrences,
+        occurrence_count: r.occurrence_count,
       })),
     });
   });
@@ -1603,6 +1614,8 @@ export function createRouter(db: Database.Database): Router {
     const { envelope_id, day_of_month, type, amount_cents, enabled } =
       parsed.data;
     const note = parsed.data.note?.trim() || "Scheduled";
+    const end_date = parsed.data.end_date ?? null;
+    const max_occurrences = parsed.data.max_occurrences ?? null;
     if (!getEditableEnvelopeId(user, envelope_id)) {
       res.status(404).json({ error: "Envelope not found" });
       return;
@@ -1611,8 +1624,8 @@ export function createRouter(db: Database.Database): Router {
     const info = db
       .prepare(
         `INSERT INTO scheduled_transactions
-        (user_id, envelope_id, day_of_month, type, amount_cents, note, enabled)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`
+        (user_id, envelope_id, day_of_month, type, amount_cents, note, enabled, end_date, max_occurrences)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         user.id,
@@ -1621,13 +1634,16 @@ export function createRouter(db: Database.Database): Router {
         type,
         amount_cents,
         note,
-        enabledFlag
+        enabledFlag,
+        end_date,
+        max_occurrences
       );
     const id = Number(info.lastInsertRowid);
     const row = db
       .prepare(
         `SELECT s.id, s.envelope_id, e.name AS envelope_name, s.day_of_month, s.type,
-          s.amount_cents, s.note, s.enabled, s.last_run_month
+          s.amount_cents, s.note, s.enabled, s.last_run_month,
+          s.end_date, s.max_occurrences, s.occurrence_count
          FROM scheduled_transactions s
          JOIN envelopes e ON e.id = s.envelope_id
          WHERE s.id = ? AND s.user_id = ?`
@@ -1643,6 +1659,9 @@ export function createRouter(db: Database.Database): Router {
           note: string;
           enabled: number;
           last_run_month: string | null;
+          end_date: string | null;
+          max_occurrences: number | null;
+          occurrence_count: number;
         }
       | undefined;
     if (!row) {
@@ -1660,6 +1679,9 @@ export function createRouter(db: Database.Database): Router {
         note: row.note,
         enabled: row.enabled === 1,
         last_run_month: row.last_run_month,
+        end_date: row.end_date,
+        max_occurrences: row.max_occurrences,
+        occurrence_count: row.occurrence_count,
       },
     });
   });
@@ -1698,7 +1720,7 @@ export function createRouter(db: Database.Database): Router {
 
     const row = db
       .prepare(
-        `SELECT envelope_id, day_of_month, type, amount_cents, note, enabled
+        `SELECT envelope_id, day_of_month, type, amount_cents, note, enabled, end_date, max_occurrences
          FROM scheduled_transactions WHERE id = ? AND user_id = ?`
       )
       .get(id, user.id) as
@@ -1709,6 +1731,8 @@ export function createRouter(db: Database.Database): Router {
           amount_cents: number;
           note: string;
           enabled: number;
+          end_date: string | null;
+          max_occurrences: number | null;
         }
       | undefined;
     if (!row) {
@@ -1723,10 +1747,14 @@ export function createRouter(db: Database.Database): Router {
     const note = p.note !== undefined ? p.note.trim() : row.note;
     const enabled =
       p.enabled !== undefined ? (p.enabled ? 1 : 0) : row.enabled;
+    const end_date = "end_date" in p ? (p.end_date ?? null) : row.end_date;
+    const max_occurrences =
+      "max_occurrences" in p ? (p.max_occurrences ?? null) : row.max_occurrences;
 
     db.prepare(
       `UPDATE scheduled_transactions SET
-        envelope_id = ?, day_of_month = ?, type = ?, amount_cents = ?, note = ?, enabled = ?
+        envelope_id = ?, day_of_month = ?, type = ?, amount_cents = ?, note = ?, enabled = ?,
+        end_date = ?, max_occurrences = ?
        WHERE id = ? AND user_id = ?`
     ).run(
       envelope_id,
@@ -1735,6 +1763,8 @@ export function createRouter(db: Database.Database): Router {
       amount_cents,
       note,
       enabled,
+      end_date,
+      max_occurrences,
       id,
       user.id
     );
@@ -1742,7 +1772,8 @@ export function createRouter(db: Database.Database): Router {
     const out = db
       .prepare(
         `SELECT s.id, s.envelope_id, e.name AS envelope_name, s.day_of_month, s.type,
-          s.amount_cents, s.note, s.enabled, s.last_run_month
+          s.amount_cents, s.note, s.enabled, s.last_run_month,
+          s.end_date, s.max_occurrences, s.occurrence_count
          FROM scheduled_transactions s
          JOIN envelopes e ON e.id = s.envelope_id
          WHERE s.id = ? AND s.user_id = ?`
@@ -1758,6 +1789,9 @@ export function createRouter(db: Database.Database): Router {
           note: string;
           enabled: number;
           last_run_month: string | null;
+          end_date: string | null;
+          max_occurrences: number | null;
+          occurrence_count: number;
         }
       | undefined;
     if (!out) {
@@ -1775,6 +1809,9 @@ export function createRouter(db: Database.Database): Router {
         note: out.note,
         enabled: out.enabled === 1,
         last_run_month: out.last_run_month,
+        end_date: out.end_date,
+        max_occurrences: out.max_occurrences,
+        occurrence_count: out.occurrence_count,
       },
     });
   });

@@ -17,7 +17,12 @@ type ScheduleRow = {
   note: string;
   enabled: boolean;
   last_run_month: string | null;
+  end_date: string | null;
+  max_occurrences: number | null;
+  occurrence_count: number;
 };
+
+type LimitMode = "none" | "date" | "count";
 
 function formatMoney(cents: number): string {
   return new Intl.NumberFormat(undefined, {
@@ -39,6 +44,9 @@ export function ScheduledTransactions() {
   const [type, setType] = useState<"ebb" | "flow">("ebb");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("Scheduled");
+  const [limitMode, setLimitMode] = useState<LimitMode>("none");
+  const [endDate, setEndDate] = useState("");
+  const [maxOccurrences, setMaxOccurrences] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -47,6 +55,9 @@ export function ScheduledTransactions() {
   const [editType, setEditType] = useState<"ebb" | "flow">("ebb");
   const [editAmount, setEditAmount] = useState("");
   const [editNote, setEditNote] = useState("");
+  const [editLimitMode, setEditLimitMode] = useState<LimitMode>("none");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editMaxOccurrences, setEditMaxOccurrences] = useState("");
   const [editBusy, setEditBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -88,10 +99,18 @@ export function ScheduledTransactions() {
           amount_cents: cents,
           note: note.trim() || "Scheduled",
           enabled: true,
+          end_date: limitMode === "date" ? endDate || null : null,
+          max_occurrences:
+            limitMode === "count"
+              ? parseInt(maxOccurrences, 10) || null
+              : null,
         }),
       });
       setAmount("");
       setNote("Scheduled");
+      setLimitMode("none");
+      setEndDate("");
+      setMaxOccurrences("");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save schedule");
@@ -107,6 +126,19 @@ export function ScheduledTransactions() {
     setEditType(s.type);
     setEditAmount((s.amount_cents / 100).toFixed(2));
     setEditNote(s.note);
+    if (s.end_date) {
+      setEditLimitMode("date");
+      setEditEndDate(s.end_date);
+      setEditMaxOccurrences("");
+    } else if (s.max_occurrences !== null) {
+      setEditLimitMode("count");
+      setEditMaxOccurrences(String(s.max_occurrences));
+      setEditEndDate("");
+    } else {
+      setEditLimitMode("none");
+      setEditEndDate("");
+      setEditMaxOccurrences("");
+    }
   }
 
   function cancelEdit() {
@@ -132,6 +164,11 @@ export function ScheduledTransactions() {
           type: editType,
           amount_cents: cents,
           note: editNote.trim() || "Scheduled",
+          end_date: editLimitMode === "date" ? editEndDate || null : null,
+          max_occurrences:
+            editLimitMode === "count"
+              ? parseInt(editMaxOccurrences, 10) || null
+              : null,
         }),
       });
       cancelEdit();
@@ -308,6 +345,44 @@ export function ScheduledTransactions() {
                 className="input-field mt-1"
               />
             </label>
+            <div className="space-y-2">
+              <span className="block text-sm font-medium text-ink">Stop after</span>
+              <div className="flex flex-wrap gap-4">
+                {(["none", "date", "count"] as LimitMode[]).map((m) => (
+                  <label key={m} className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm text-ink touch-manipulation">
+                    <input
+                      type="radio"
+                      name="limitmode"
+                      checked={limitMode === m}
+                      onChange={() => setLimitMode(m)}
+                      className="h-4 w-4 accent-accent"
+                    />
+                    {m === "none" ? "Never" : m === "date" ? "End date" : "N occurrences"}
+                  </label>
+                ))}
+              </div>
+              {limitMode === "date" && (
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="input-field"
+                  required
+                />
+              )}
+              {limitMode === "count" && (
+                <input
+                  type="number"
+                  value={maxOccurrences}
+                  onChange={(e) => setMaxOccurrences(e.target.value)}
+                  placeholder="e.g. 12"
+                  min={1}
+                  max={9999}
+                  className="input-field"
+                  required
+                />
+              )}
+            </div>
             <button
               type="submit"
               disabled={
@@ -315,7 +390,9 @@ export function ScheduledTransactions() {
                 envelopeId === "" ||
                 Math.round(
                   parseFloat(amount.replace(/[^0-9.]/g, "") || "0") * 100
-                ) <= 0
+                ) <= 0 ||
+                (limitMode === "date" && !endDate) ||
+                (limitMode === "count" && !(parseInt(maxOccurrences, 10) > 0))
               }
               className="btn-primary touch-manipulation"
             >
@@ -433,6 +510,44 @@ export function ScheduledTransactions() {
                           required
                         />
                       </label>
+                      <div className="space-y-2">
+                        <span className="block text-sm font-medium text-ink">Stop after</span>
+                        <div className="flex flex-wrap gap-4">
+                          {(["none", "date", "count"] as LimitMode[]).map((m) => (
+                            <label key={m} className="flex min-h-[44px] cursor-pointer items-center gap-2 text-sm text-ink touch-manipulation">
+                              <input
+                                type="radio"
+                                name={`editlimitmode-${s.id}`}
+                                checked={editLimitMode === m}
+                                onChange={() => setEditLimitMode(m)}
+                                className="h-4 w-4 accent-accent"
+                              />
+                              {m === "none" ? "Never" : m === "date" ? "End date" : "N occurrences"}
+                            </label>
+                          ))}
+                        </div>
+                        {editLimitMode === "date" && (
+                          <input
+                            type="date"
+                            value={editEndDate}
+                            onChange={(e) => setEditEndDate(e.target.value)}
+                            className="input-field"
+                            required
+                          />
+                        )}
+                        {editLimitMode === "count" && (
+                          <input
+                            type="number"
+                            value={editMaxOccurrences}
+                            onChange={(e) => setEditMaxOccurrences(e.target.value)}
+                            placeholder="e.g. 12"
+                            min={1}
+                            max={9999}
+                            className="input-field"
+                            required
+                          />
+                        )}
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="submit"
@@ -443,7 +558,9 @@ export function ScheduledTransactions() {
                               parseFloat(
                                 editAmount.replace(/[^0-9.]/g, "") || "0"
                               ) * 100
-                            ) <= 0
+                            ) <= 0 ||
+                            (editLimitMode === "date" && !editEndDate) ||
+                            (editLimitMode === "count" && !(parseInt(editMaxOccurrences, 10) > 0))
                           }
                           className="btn-primary min-h-11"
                         >
@@ -484,6 +601,10 @@ export function ScheduledTransactions() {
                         <p className="mt-1 text-xs text-muted">
                           Last run:{" "}
                           {s.last_run_month ?? "—"}
+                          {s.end_date ? ` · Ends ${s.end_date}` : ""}
+                          {s.max_occurrences !== null
+                            ? ` · ${s.occurrence_count} / ${s.max_occurrences} runs`
+                            : ""}
                           {!s.enabled ? " · Paused" : ""}
                         </p>
                         <div className="mt-3 flex flex-wrap items-center gap-4">
