@@ -3,6 +3,7 @@ services:
     build: .
     image: envelope-budget:local
     restart: unless-stopped
+    init: true
     ports:
       - "4000:4000"
     environment:

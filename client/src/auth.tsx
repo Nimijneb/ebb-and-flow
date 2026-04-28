@@ -71,6 +71,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  // Sync auth state across browser tabs: a logout/login in one tab updates
+  // localStorage, which fires `storage` in every other tab.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key && e.key !== "envelope_budget_token" && e.key !== "envelope_budget_refresh") {
+        return;
+      }
+      const t = getToken();
+      const rt = getRefreshToken();
+      if (!t && !rt) {
+        setUser(null);
+        setLoading(false);
+      } else {
+        void refresh();
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [refresh]);
+
   const login = useCallback(async (username: string, password: string) => {
     const { token, refreshToken, user: u } = await api<{
       token: string;

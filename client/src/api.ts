@@ -84,12 +84,18 @@ export async function api<T>(
 
   if (res.status === 204) return undefined as T;
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Non-JSON response (e.g. an HTML 502 page from a reverse proxy);
+      // fall through and surface the HTTP status instead of a parse error.
+    }
+  }
   if (!res.ok) {
-    const msg =
-      data?.error && typeof data.error === "string"
-        ? data.error
-        : res.statusText;
+    const errField = (data as { error?: unknown } | null)?.error;
+    const msg = typeof errField === "string" ? errField : res.statusText;
     throw new Error(msg || "Request failed");
   }
   return data as T;

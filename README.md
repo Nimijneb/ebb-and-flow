@@ -33,6 +33,10 @@ The image is built from `main` and published to **GitHub Container Registry** as
 
 There is **no public registration**. The first account is created from `ADMIN_USERNAME` / `ADMIN_PASSWORD` on startup. That admin adds everyone else under **Settings**.
 
+> **Networking note:** the bundled compose files publish port `4000` on all host interfaces. On a single-user machine that is fine. On a shared host, change the mapping to `127.0.0.1:4000:4000` and front it with a reverse proxy that terminates TLS.
+
+> **Sessions:** logging out on one device invalidates every active session for that account on every device (the server bumps a token version). This is intentional — there is no way to keep a phone session alive after logging out on a laptop.
+
 ### Optional environment
 
 | Variable | Notes |

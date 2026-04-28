@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { Router } from "express";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import type Database from "better-sqlite3";
@@ -68,6 +68,10 @@ const envelopePatchSchema = z
     { message: "Provide at least one field to update" }
   );
 
+/** Strict ISO 8601: `YYYY-MM-DDTHH:MM:SS(.sss)?Z` or plain `YYYY-MM-DD`. */
+const ISO_DATETIME_OR_DATE_RE =
+  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)?$/;
+
 const transactionSchema = z.object({
   amount_cents: z.number().int().positive().max(999_999_999_99),
   type: z.enum(["ebb", "flow"]),
@@ -76,8 +80,11 @@ const transactionSchema = z.object({
     .trim()
     .min(1, "Merchant or description is required")
     .max(500),
-  /** ISO 8601 or parseable date string; omit for “now” on create, omit on patch to leave unchanged */
-  created_at: z.string().optional(),
+  /** Strict ISO 8601 datetime (UTC, with `Z`) or `YYYY-MM-DD`; omit for "now" on create, omit on patch to leave unchanged. */
+  created_at: z
+    .string()
+    .regex(ISO_DATETIME_OR_DATE_RE, "Must be ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ)")
+    .optional(),
 });
 
 function normalizeOptionalCreatedAt(
@@ -214,6 +221,11 @@ const authRouteLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many requests; try again shortly." },
 });
+
+// Precomputed at module load so the login path can run bcrypt.compare even
+// when the username does not exist — equalizes response time and removes the
+// user-enumeration timing side-channel.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("constant-time-placeholder", 12);
 
 const registerRouteLimiter = rateLimit({
   windowMs: 60_000,
@@ -432,7 +444,11 @@ export function createRouter(db: Database.Database): Router {
             token_version: number;
           }
         | undefined;
-      if (!row || !(await bcrypt.compare(password, row.password_hash))) {
+      const passwordOk = await bcrypt.compare(
+        password,
+        row?.password_hash ?? DUMMY_PASSWORD_HASH
+      );
+      if (!row || !passwordOk) {
         res.status(401).json({ error: "Invalid username or password" });
         return;
       }
@@ -517,7 +533,7 @@ export function createRouter(db: Database.Database): Router {
     res.status(204).end();
   });
 
-  r.post("/api/admin/users", authMiddleware, async (req, res, next) => {
+  r.post("/api/admin/users", authRouteLimiter, authMiddleware, async (req, res, next) => {
     const { user } = req as AuthedRequest;
     if (!user.isAdmin) {
       res.status(403).json({ error: "Only an administrator can create accounts." });
@@ -561,7 +577,7 @@ export function createRouter(db: Database.Database): Router {
     }
   });
 
-  r.patch("/api/admin/users/:id", authMiddleware, (req, res) => {
+  r.patch("/api/admin/users/:id", authRouteLimiter, authMiddleware, (req, res) => {
     const { user } = req as AuthedRequest;
     if (!user.isAdmin) {
       res.status(403).json({ error: "Only an administrator can change admin status." });
@@ -629,6 +645,7 @@ export function createRouter(db: Database.Database): Router {
 
   r.patch(
     "/api/admin/users/:id/password",
+    authRouteLimiter,
     authMiddleware,
     async (req, res, next) => {
       try {
