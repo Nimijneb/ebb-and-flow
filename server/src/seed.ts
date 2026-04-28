@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import type Database from "better-sqlite3";
 import { newInviteCode } from "./invite.js";
 

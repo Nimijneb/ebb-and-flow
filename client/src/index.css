@@ -187,6 +187,13 @@ input[type="checkbox"] {
 }
 
 @layer components {
+  .login-backdrop {
+    background-image:
+      radial-gradient(circle at 20% 20%, var(--color-accent-dim) 0%, transparent 45%),
+      radial-gradient(circle at 80% 10%, var(--color-warm-dim) 0%, transparent 40%),
+      radial-gradient(circle at 50% 100%, var(--color-border) 0%, transparent 50%);
+  }
+
   .input-field {
     @apply min-h-11 w-full rounded-xl border border-border bg-paper px-4 text-base text-ink outline-none ring-accent/30 transition focus:ring-2;
     -webkit-appearance: none;

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 /** `w-max` + `max-w-*` — avoid `w: 100vw` on an absolutely positioned panel (iOS Safari overflow / “shrunk” layout). */
 const panelClass =
@@ -23,6 +23,8 @@ export function HelpPopover({
   variant = "underline",
   className = "",
 }: Props) {
+  const tooltipId = useId();
+
   const trigger =
     variant === "underline" ? (
       <span className="inline cursor-help border-b border-dotted border-muted transition-colors group-hover:border-ink">
@@ -36,9 +38,10 @@ export function HelpPopover({
     <span
       className={`group relative inline-block max-w-full rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${className}`}
       tabIndex={0}
+      aria-describedby={tooltipId}
     >
       {trigger}
-      <div role="tooltip" className={panelClass}>
+      <div id={tooltipId} role="tooltip" className={panelClass}>
         {content}
       </div>
     </span>

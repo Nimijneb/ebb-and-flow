@@ -6,6 +6,7 @@ services:
   envelope-budget:
     image: ghcr.io/nimijneb/envelope-budget:latest
     restart: unless-stopped
+    init: true
     ports:
       - "4000:4000"
     environment:

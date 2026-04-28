@@ -37,12 +37,7 @@ export function Login() {
   return (
     <div className="relative flex min-h-[100dvh] flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain bg-paper">
       <div
-        className="pointer-events-none fixed inset-0 opacity-[0.35] dark:opacity-[0.55]"
-        style={{
-          backgroundImage: `radial-gradient(circle at 20% 20%, var(--color-accent-dim) 0%, transparent 45%),
-            radial-gradient(circle at 80% 10%, var(--color-warm-dim) 0%, transparent 40%),
-            radial-gradient(circle at 50% 100%, var(--color-border) 0%, transparent 50%)`,
-        }}
+        className="login-backdrop pointer-events-none fixed inset-0 opacity-[0.35] dark:opacity-[0.55]"
         aria-hidden
       />
       <div className="safe-x safe-t relative z-[1] mx-auto flex w-full max-w-md flex-1 flex-col justify-start pt-6 pb-40 sm:justify-center sm:py-16 sm:pb-16">

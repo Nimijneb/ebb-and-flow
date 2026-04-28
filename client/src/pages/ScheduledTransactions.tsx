@@ -299,6 +299,11 @@ export function ScheduledTransactions() {
                     </option>
                   ))}
                 </select>
+                {dayOfMonth >= 29 && (
+                  <span className="mt-1 block text-xs text-muted">
+                    In months with fewer days, runs on the last day of the month.
+                  </span>
+                )}
               </label>
               <fieldset className="flex min-h-[44px] items-center gap-6 border-0 p-0 sm:pb-1">
                 <legend className="sr-only">Transaction type</legend>
@@ -465,6 +470,11 @@ export function ScheduledTransactions() {
                               )
                             )}
                           </select>
+                          {editDay >= 29 && (
+                            <span className="mt-1 block text-xs font-normal text-muted">
+                              In months with fewer days, runs on the last day of the month.
+                            </span>
+                          )}
                         </label>
                       </div>
                       <fieldset className="flex min-h-[44px] items-center gap-6 border-0 p-0">
